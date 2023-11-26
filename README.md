@@ -102,13 +102,67 @@ For example:
 
 ### summarise_metadata
 
-What version of Juju is used?
-What other assumptions does the metadata define?
-How many of each type of container is required?
-How many of each type of storage is required?
-How many of each type of device is required?
-What types of relations are defined?
-What types of resources are required?
+Provides answers to questions like:
+
+* What version of Juju is used?
+* What other assumptions does the metadata define?
+* How many of each type of container is required?
+* How many of each type of storage is required?
+* How many of each type of device is required? (Note: currently none, so not in the output).
+* What types of relations are defined?
+* What types of resources are required?
+
+Example output:
+
+```
+            Juju Versions
+┏━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Version       ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ juju          │ 2     │ 1.3        │
+│ juju >= 2.9   │ 1     │ 0.7        │
+│ juju >= 2.9.0 │ 2     │ 1.3        │
+│ juju >= 3.0.2 │ 2     │ 1.3        │
+│ juju >= 3.0.3 │ 2     │ 1.3        │
+│ juju >= 3.1   │ 7     │ 4.6        │
+└───────────────┴───────┴────────────┘
+
+              Assumes
+┏━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Requirement ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ k8s-api     │ 52    │ 34.4       │
+└─────────────┴───────┴────────────┘
+
+                    Common Resources
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Resource                         ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ oci-image                        │ 31    │ 20.5       │
+│ httpbin-image                    │ 3     │ 2.0        │
+│ lego-image                       │ 3     │ 2.0        │
+│ postgresql-image                 │ 2     │ 1.3        │
+│ statsd-prometheus-exporter-image │ 2     │ 1.3        │
+└──────────────────────────────────┴───────┴────────────┘
+
+                    Common Relations
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Relation                        ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ certificates : tls-certificates │ 33    │ 21.9       │
+│ ingress : ingress               │ 31    │ 20.5       │
+│ logging : loki_push_api         │ 20    │ 13.2       │
+│ nginx-route : nginx-route       │ 10    │ 6.6        │
+│ catalogue : catalogue           │ 7     │ 4.6        │
+└─────────────────────────────────┴───────┴────────────┘
+
+           Storage Types
+┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Storage    ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ filesystem │ 58    │ 38.4       │
+└────────────┴───────┴────────────┘
+```
 
 ### summarise_tests
 
