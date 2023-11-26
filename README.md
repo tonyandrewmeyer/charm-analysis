@@ -268,10 +268,59 @@ Provides insight into the automated tests that the charms have. For example:
 
 ### summarise_code
 
-What events are observed?
-How many times is defer used?
-How many charms are using `hooks` or `reactive`?
-How many of the repos are bundles?
+Attempts to answer questions like:
+* What events are observed?
+* How many times is defer used?
+* How many charms are using `hooks` or `reactive`? (This is currently just in the logging output).
+* How many of the repos are bundles? (This is currently just in the logging output).
+
+Example output:
+
+```
+                          Events
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Event                             ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ action                            │ 52    │ 35.4       │
+│ config_changed                    │ 100   │ 68.0       │
+│ install                           │ 64    │ 43.5       │
+│ leader_elected                    │ 25    │ 17.0       │
+│ pebble_ready                      │ 74    │ 50.3       │
+│ relation_broken                   │ 27    │ 18.4       │
+│ relation_changed                  │ 44    │ 29.9       │
+│ relation_created                  │ 22    │ 15.0       │
+│ relation_joined                   │ 37    │ 25.2       │
+│ remove                            │ 31    │ 21.1       │
+│ start                             │ 25    │ 17.0       │
+│ update_status                     │ 45    │ 30.6       │
+│ upgrade_charm                     │ 41    │ 27.9       │
+└───────────────────────────────────┴───────┴────────────┘
+
+     event.defer() Frequency
+┏━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Frequency ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0         │ 82    │ 55.8       │
+│ 1         │ 22    │ 15.0       │
+│ 2         │ 7     │ 4.8        │
+│ 3         │ 5     │ 3.4        │
+│ 4         │ 6     │ 4.1        │
+│ 5         │ 6     │ 4.1        │
+│ 6         │ 1     │ 0.7        │
+│ 7         │ 1     │ 0.7        │
+│ 8         │ 1     │ 0.7        │
+│ 9         │ 2     │ 1.4        │
+│ 10        │ 1     │ 0.7        │
+│ 11        │ 7     │ 4.8        │
+│ 12        │ 1     │ 0.7        │
+│ 13        │ 3     │ 2.0        │
+│ 14        │ 0     │ 0.0        │
+│ 15        │ 1     │ 0.7        │
+│ 16        │ 1     │ 0.7        │
+├───────────┼───────┼────────────┤
+│ Total     │ 147   │ 100.0      │
+└───────────┴───────┴────────────┘
+```
 
 ### super-tox
 

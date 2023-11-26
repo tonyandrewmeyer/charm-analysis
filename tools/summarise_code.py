@@ -4,14 +4,18 @@
 
 import ast
 import collections
+import logging
 import pathlib
-import pprint
 
 import click
-import yaml
+import rich.logging
+from helpers import count_and_percentage_table
+from helpers import iter_entries
+
+logger = logging.getLogger(__name__)
 
 
-def _normalise_event(event):
+def _normalise_event(event: str):
     """Drop uninteresting elements like the names of containers."""
     if event.endswith("_pebble_ready"):
         return "pebble_ready"
@@ -23,100 +27,120 @@ def _normalise_event(event):
     return event
 
 
-def observing(module):
+def observing(module: pathlib.Path):
     """Iterate through the events that a charm is observing."""
     with module.open() as charm:
         tree = ast.parse(charm.read())
-        # Assume that any calls to a method called "observe" are framework.observe calls.
-        for node in ast.walk(tree):
-            if (
-                not isinstance(node, ast.Call)
-                or not isinstance(node.func, ast.Attribute)
-                or node.func.attr != "observe"
-                or not node.args
-            ):
-                continue
-            arg0 = node.args[0]
-            if isinstance(arg0, ast.Attribute):
-                yield _normalise_event(arg0.attr)
-            elif isinstance(arg0, ast.Name):
-                yield _normalise_event(arg0.id)
-            elif (
-                isinstance(arg0, ast.Call)
-                and getattr(arg0.func, "id", "") == "getattr"
-                and arg0.args[0].attr == "on"
-            ):
-                yield _normalise_event(arg0.args[1].value)
-            else:
-                yield "TODO"
+    # Assume that any calls to a method called "observe" are framework.observe calls.
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "observe"
+            or not node.args
+        ):
+            continue
+        arg0 = node.args[0]
+        if isinstance(arg0, ast.Attribute):
+            yield _normalise_event(arg0.attr), node.args[1].attr
+        elif isinstance(arg0, ast.Name):
+            yield _normalise_event(arg0.id), node.args[1].attr
+        elif (
+            isinstance(arg0, ast.Call)
+            and getattr(arg0.func, "id", "") == "getattr"
+            and arg0.args[0].attr == "on"
+        ):
+            yield _normalise_event(arg0.args[1].value), node.args[1].attr
+        else:
+            yield "TODO", "TODO"
 
 
-def defer_count(module):
+def defer_count(module: pathlib.Path):
     """Count the number of times that defer() is called."""
     count = 0
-    with (module).open() as charm:
+    with module.open() as charm:
         tree = ast.parse(charm.read())
-        # Assume that all calls to a function called "defer" are event.defer()s.
-        for node in ast.walk(tree):
-            if (
-                not isinstance(node, ast.Call)
-                or not isinstance(node.func, ast.Attribute)
-                or node.func.attr != "defer"
-            ):
-                continue
-            count += 1
+    # Assume that all calls to a function called "defer" are event.defer()s.
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != "defer"
+        ):
+            continue
+        count += 1
     return count
+
+
+def relation_broken(module: pathlib.Path, handler_name: str):
+    with module.open() as charm:
+        tree = ast.parse(charm.read())
+        # Walk through the tree to get to the methods we want - there are much better ways
+        # to do this.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == handler_name:
+                body = node.body
+                break
+        else:
+            logger.info("Couldn't find %s in %s", handler_name, module)
+            return
+        for expr in body:
+            for node in ast.walk(expr):
+                # Is this sufficient to check what we need to know?
+                if isinstance(node, ast.Attribute) and node.attr == "id":
+                    logger.info("Found x.id in relation-broken handler.")
 
 
 @click.option("--cache-folder", default=".cache")
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the charm code."""
+    FORMAT = "%(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=FORMAT,
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
+
+    total = 0
     events = collections.Counter()
     defers = collections.Counter()
-    reactive = 0
-    hooks = 0
-    unknown = set()
-    bundles = 0
-    repos = []
-    for repo in pathlib.Path(cache_folder).iterdir():
-        if repo.name.startswith("."):
-            continue
-        if (repo / "bundle.yaml").exists():
-            bundles += 1
-            for charm in (repo / "charms").iterdir():
-                repos.append(charm)
-        else:
-            repos.append(repo)
-    for repo in repos:
-        if repo.name.startswith("."):
-            continue
-        if (repo / "reactive").exists():
-            reactive += 1
-            # Not sure what to do with these - just ignore for now.
-            continue
-        elif (repo / "hooks").exists():
-            hooks += 1
-            # Not sure what to do with these - just ignore for now.
-            continue
-        # Assume that all the code is in src/charm.py if it exists.
-        entry = "src/charm.py"
-        if not (repo / entry).exists():
-            if (repo / "charmcraft.yaml").exists():
-                with (repo / "charmcraft.yaml").open() as charmcraft:
-                    data = yaml.safe_load(charmcraft)
-                    # Assume all the code is in the entrypoint module.
-                    entry = data["parts"]["charm"]["charm-entrypoint"]
-            else:
-                unknown.add(repo)
-            continue
-        events.update(observing(repo / entry))
-        defers[defer_count(repo / entry)] += 1
+    for entry in iter_entries(cache_folder):
+        total += 1
+        # This will have some collisions - e.g. all actions get normalised to a
+        # single `event`, relation events are normalised, etc.
+        repo_events = {event: method for event, method in observing(entry)}
+        events.update(repo_events.keys())
+        defers[defer_count(entry)] += 1
+        if "relation_broken" in repo_events:
+            relation_broken(entry, repo_events["relation_broken"])
 
-    pprint.pprint(events)
-    pprint.pprint(defers)
-    print(f"Reactive: {reactive}, Hooks: {hooks}, Bundles: {bundles}")
-    pprint.pprint(unknown)
+    report(total, events, defers)
+
+
+def report(total, events, defers):
+    """Output a report of the results to the console."""
+    console = rich.console.Console()
+    console.print()  # Separate out from any logging.
+
+    # There's probably a more interesting way to show this.
+    table = count_and_percentage_table("Events", "Event", total, sorted(events.items()))
+    console.print(table)
+    console.print()
+
+    # Fill in the zeros.
+    freq = [(i, defers[i]) for i in range(max(defers) + 1)]
+    table = count_and_percentage_table("event.defer() Frequency", "Frequency", total, freq)
+    table.add_section()
+    table.add_row(
+        "Total", str(sum(defers.values())), f"{(sum(defers.values()) / total * 100):.1f}"
+    )
+    console.print(table)
+    console.print()
+
+    # TODO:
+    # * Presumably there's a lot more analysis that could be done here!
 
 
 if __name__ == "__main__":
