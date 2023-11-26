@@ -32,6 +32,7 @@ import pathlib
 import typing
 
 import click
+import rich.logging
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,14 @@ def main(cache_folder: str, charm_list: typing.TextIO):
     The `git` CLI tool is used via a subprocess, so must be able to handle any
     authentication required.
     """
-    logging.basicConfig(level=logging.INFO)
+    FORMAT = "%(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=FORMAT,
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
+
     os.makedirs(cache_folder, exist_ok=True)
     input = csv.DictReader(charm_list)
     asyncio.run(process_input(input, pathlib.Path(cache_folder)))
