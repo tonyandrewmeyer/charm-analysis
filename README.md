@@ -65,8 +65,44 @@ What types of resources are required?
 
 ### summarise_tests
 
-Is tox used? If so, what environments are defined?
-What testing tools are used?
+Provides insight into the automated tests that the charms have. For example:
+
+```
+149 out of 151 (98.7%) use tox.
+
+       Unit Test Libraries
+┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Library  ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ unittest │ 90    │ 60.4       │
+│ pytest   │ 144   │ 96.6       │
+└──────────┴───────┴────────────┘
+
+           Testing Frameworks
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Framework       ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ Harness         │ 123   │ 82.6       │
+│ Scenario        │ 15    │ 10.1       │
+│ pytest-operator │ 116   │ 77.9       │
+└─────────────────┴───────┴────────────┘
+
+          Common Tox Environments
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Environment         ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ lint                │ 149   │ 100.0      │
+│ unit                │ 144   │ 96.6       │
+│ integration         │ 127   │ 85.2       │
+│ fmt                 │ 122   │ 81.9       │
+│ static              │ 44    │ 29.5       │
+│ update-requirements │ 39    │ 26.2       │
+│ coverage-report     │ 24    │ 16.1       │
+│ scenario            │ 20    │ 13.4       │
+│ format              │ 19    │ 12.8       │
+│ src-docs            │ 13    │ 8.7        │
+└─────────────────────┴───────┴────────────┘
+```
 
 ### summarise_code
 

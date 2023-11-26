@@ -5,10 +5,15 @@
 import ast
 import collections
 import configparser
+import logging
+import operator
 import pathlib
-import pprint
 
 import click
+import rich.console
+import rich.logging
+import rich.table
+from helpers import iter_repositories
 
 
 def tox_ini(location: pathlib.Path, tox: collections.Counter):
@@ -23,12 +28,12 @@ def find_imports(module):
     """Iterate through the names of the modules imported by the specified module."""
     with module.open() as setup:
         tree = ast.parse(setup.read())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                yield node.module
-            elif isinstance(node, ast.Import):
-                for name in node.names:
-                    yield name.name
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            yield node.module
+        elif isinstance(node, ast.Import):
+            for name in node.names:
+                yield name.name
 
 
 def find_test_imports(base):
@@ -47,13 +52,21 @@ def find_test_imports(base):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the tests of the charms."""
+    FORMAT = "%(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=FORMAT,
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
+
+    total = 0
     uses_tox = 0
     tox = collections.Counter()
     test_imports = collections.Counter()
     test_frameworks = collections.Counter()
-    for repo in pathlib.Path(cache_folder).iterdir():
-        if repo.name.startswith("."):
-            continue
+    for repo in iter_repositories(cache_folder):
+        total += 1
         if (repo / "tox.ini").exists():
             uses_tox += 1
             tox_ini(repo / "tox.ini", tox)
@@ -70,16 +83,64 @@ def main(cache_folder):
             if "pytest_operator.plugin" in repo_test_imports:
                 test_frameworks["pytest_operator"] += 1
             test_imports.update(repo_test_imports)
-    print("Uses tox:", uses_tox)
-    pprint.pprint(tox)
-    print(
-        f"Harness: {test_imports['ops.testing']}, "
-        f"Scenario: {test_imports['scenario']}, "
-        f"unittest {test_imports['unittest']}, "
-        f"pytest {test_imports['pytest']}, "
-        f"pytest_operator: {test_imports['pytest_operator.plugin']}"
+
+    report(uses_tox, total, test_imports, tox)
+
+
+def _count_and_percentage_table(title, col0_title, total, counts):
+    """Return a rich.table.Table that has a count and percentage columns."""
+    table = rich.table.Table(title=title)
+    table.add_column(col0_title)
+    table.add_column("Count")
+    table.add_column("Percentage")
+    for label, count in counts:
+        table.add_row(label, str(count), f"{(count / total * 100):.1f}")
+    return table
+
+
+def report(uses_tox, total, test_imports, tox_environments):
+    """Output a report of the results to the console."""
+    console = rich.console.Console()
+    console.print()  # Separate out from any logging.
+
+    console.print(f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox.")
+    console.print()
+
+    table = _count_and_percentage_table(
+        "Unit Test Libraries",
+        "Library",
+        uses_tox,
+        (("unittest", test_imports["unittest"]), ("pytest", test_imports["pytest"])),
     )
-    pprint.pprint(test_frameworks)
+    console.print(table)
+    console.print()
+
+    table = _count_and_percentage_table(
+        "Testing Frameworks",
+        "Framework",
+        uses_tox,
+        (
+            ("Harness", test_imports["ops.testing"]),
+            ("Scenario", test_imports["scenario"]),
+            ("pytest-operator", test_imports["pytest_operator.plugin"]),
+        ),
+    )
+    console.print(table)
+    console.print()
+
+    common_environments = [(env, count) for env, count in tox_environments.items()]
+    common_environments.sort(key=operator.itemgetter(1), reverse=True)
+    table = _count_and_percentage_table(
+        "Common Tox Environments", "Environment", uses_tox, common_environments[:10]
+    )
+    console.print(table)
+    console.print()
+
+    # TODO:
+    # * 20 have a "scenario" tox environment, but only 15 are importing scenario:
+    #   one of those numbers is surely wrong.
+    # * There's a third unit test framework for charms, but I can't remember the
+    #   name or where I would have that written down.
 
 
 if __name__ == "__main__":
