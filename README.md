@@ -279,13 +279,13 @@ Run a tox environment across all of the charms at once.
 
 TODO:
 
-* All at once seems too much for an average device to handle. Adjusted to a set
+* [ ] All at once seems too much for an average device to handle. Adjusted to a set
   amount of concurrency, but seems to still struggle - maybe it's specific
   charms?
-* Need to do more with the actual results, not just check that everything was ok.
+* [ ] Need to do more with the actual results, not just check that everything was ok.
   For example, how many tests were collected?
-* Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
-* Should be able to target a subset of charms (maybe the above would do this?)
+* [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
+* [ ] Should be able to target a subset of charms (maybe the above would do this?)
 
 ## To-do
 
