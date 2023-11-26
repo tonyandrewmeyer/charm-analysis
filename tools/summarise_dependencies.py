@@ -4,31 +4,44 @@
 
 import ast
 import collections
+import logging
+import operator
 import pathlib
-import pprint
 import tomllib
 
 import click
+import rich.console
+import rich.logging
+from helpers import count_and_percentage_table
+from helpers import iter_repositories
+
+logger = logging.getLogger(__name__)
 
 
 def requirements_txt(
     location: pathlib.Path,
     ops_versions: collections.Counter,
     all_dependencies: collections.Counter,
+    all_dependencies_pinned: collections.Counter,
 ):
     with location.open() as requirements:
         for line in requirements.readlines():
             line = line.strip()
+            if not line:
+                continue
             if ops_versions and "ops" in line:
                 ops_versions[line] += 1
             elif not line.startswith(("--hash", "#")):
-                all_dependencies[line.strip()] += 1
+                # There should be a cleaner way to do this.
+                all_dependencies[line.strip().split("=", 1)[0]] += 1
+                all_dependencies_pinned[line.strip()] += 1
 
 
 def setup_py(
     location: pathlib.Path,
     ops_versions: collections.Counter,
     all_dependencies: collections.Counter,
+    all_dependencies_pinned: collections.Counter,
     python_versions: collections.Counter,
 ):
     has_install_requires = False
@@ -44,7 +57,9 @@ def setup_py(
                         if "ops" in val:
                             ops_versions[val] += 1
                         else:
-                            all_dependencies[val] += 1
+                            # There should be a cleaner way to do this.
+                            all_dependencies[val.split("=", 1)[0]] += 1
+                            all_dependencies_pinned[val] += 1
                 elif kw.arg == "python_requires":
                     python_versions[kw.value.value] += 1
     return has_install_requires
@@ -54,6 +69,7 @@ def pyproject_toml(
     location: pathlib.Path,
     ops_versions: collections.Counter,
     all_dependencies: collections.Counter,
+    all_dependencies_pinned: collections.Counter,
     python_versions: collections.Counter,
     optional_dependency_sections: collections.Counter,
     dev_dependencies=collections.Counter,
@@ -66,7 +82,9 @@ def pyproject_toml(
                 if "ops" in dep:
                     ops_versions[dep] += 1
                 else:
-                    all_dependencies[dep] += 1
+                    # There should be a cleaner way to do this.
+                    all_dependencies[dep.split("=", 1)[0]] += 1
+                    all_dependencies_pinned[dep] += 1
         if "requires-python" in data:
             python_versions[data["requires-python"]] += 1
         for section in data.get("project", {}).get("optional-dependencies", {}):
@@ -107,23 +125,32 @@ def pyproject_toml(
                 if "ops" in dep:
                     ops_versions[dep] += 1
                 else:
-                    all_dependencies[dep] += 1
+                    # There should be a cleaner way to do this.
+                    all_dependencies[dep.split("=", 1)[0]] += 1
+                    all_dependencies_pinned[dep] += 1
 
 
 @click.option("--cache-folder", default=".cache")
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the dependencies of the charms."""
+    FORMAT = "%(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=FORMAT,
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
+
     total = 0
     dependencies_source = collections.Counter()
     python_versions = collections.Counter()
     ops_versions = collections.Counter()
     all_dependencies = collections.Counter()
+    all_dependencies_pinned = collections.Counter()
     dev_dependencies = collections.Counter()
     optional_dependency_sections = collections.Counter()
-    for repo in pathlib.Path(cache_folder).iterdir():
-        if repo.name.startswith("."):
-            continue
+    for repo in iter_repositories(cache_folder):
         total += 1
         # Look for requirements.txt, setup.py, and pyproject.toml.
         # It's possible that a single repository has more than one of these.
@@ -131,31 +158,106 @@ def main(cache_folder: str):
         # Python and ops version counts.
         if (repo / "requirements.txt").exists():
             dependencies_source["requirements.txt"] += 1
-            requirements_txt(repo / "requirements.txt", ops_versions, all_dependencies)
+            requirements_txt(
+                repo / "requirements.txt",
+                ops_versions,
+                all_dependencies,
+                all_dependencies_pinned,
+            )
         if (repo / "requirements-dev.txt").exists():
             dependencies_source["requirements-dev.txt"] += 1
-            requirements_txt(repo / "requirements-dev.txt", None, all_dependencies)
+            requirements_txt(
+                repo / "requirements-dev.txt",
+                None,
+                all_dependencies,
+                all_dependencies_pinned,
+            )
         if (repo / "setup.py").exists():
-            if setup_py(repo / "setup.py", ops_versions, all_dependencies, python_versions):
+            if setup_py(
+                repo / "setup.py",
+                ops_versions,
+                all_dependencies,
+                all_dependencies_pinned,
+                python_versions,
+            ):
                 dependencies_source["setup.py"] += 1
         if (repo / "pyproject.toml").exists():
             for source in pyproject_toml(
                 repo / "pyproject.toml",
                 ops_versions,
                 all_dependencies,
+                all_dependencies_pinned,
                 python_versions,
                 optional_dependency_sections,
                 dev_dependencies,
             ):
                 dependencies_source[source] += 1
+    assert not python_versions, "Found some Python versions, add that to the report!"
+    assert not dev_dependencies, "Found some dev dependencies, add that to the report!"
+    report(
+        total,
+        dependencies_source,
+        ops_versions,
+        all_dependencies,
+        all_dependencies_pinned,
+        optional_dependency_sections,
+    )
 
-    pprint.pprint(dependencies_source)
-    pprint.pprint(python_versions)
-    pprint.pprint(ops_versions)
-    pprint.pprint(all_dependencies)
-    pprint.pprint(dev_dependencies)
-    pprint.pprint(optional_dependency_sections)
-    print("Total", total)
+
+def report(
+    total,
+    dependencies_source,
+    ops_versions,
+    all_dependencies,
+    all_dependencies_pinned,
+    optional_dependency_sections,
+):
+    """Output a report of the results to the console."""
+    console = rich.console.Console()
+    console.print()  # Separate out from any logging.
+
+    table = count_and_percentage_table(
+        "Dependency Sources", "Source", total, sorted(dependencies_source.items())
+    )
+    console.print(table)
+    console.print()
+
+    table = count_and_percentage_table(
+        "Ops Versions", "Version", total, sorted(ops_versions.items())
+    )
+    console.print(table)
+    console.print()
+
+    common_deps = [(env, count) for env, count in all_dependencies.items()]
+    common_deps.sort(key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table("Common Dependencies", "Package", total, common_deps[:10])
+    console.print(table)
+    console.print()
+
+    common_deps = [(env, count) for env, count in all_dependencies_pinned.items()]
+    common_deps.sort(key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table(
+        "Common Dependencies and Version", "Package", total, common_deps[:5]
+    )
+    console.print(table)
+    console.print()
+
+    table = count_and_percentage_table(
+        "pyproject.toml Optional Dependency Sections",
+        "Section",
+        total,
+        sorted(optional_dependency_sections.items()),
+    )
+    console.print(table)
+    console.print()
+
+    # TODO:
+    # * Properly parse the version specifiers for the dependencies
+    #   (this should also avoid more of the FPs)
+    # * Remove duplication of dependencies caused by charms listing them in
+    #   multiple sources (e.g. a lock file plus setup.py).
+    # * Do the charms really not specify the Python versions they work with?
+    # * Why am I not finding the dev dependencies?
 
 
 if __name__ == "__main__":

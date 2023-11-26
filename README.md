@@ -41,11 +41,72 @@ calling the CLI.
 
 ### summarise_dependencies
 
-What version of ops is used?
-Are dependencies listed in requirements.txt, setup.py, or pyproject.toml?
-What dependencies are there other than ops?
-What version of Python is required?
-What optional dependency configurations are defined?
+Attempts to answer questions like:
+
+* What version of ops is used?
+* Are dependencies listed in requirements.txt, setup.py, or pyproject.toml?
+* What dependencies are there other than ops?
+* What version of Python is required?
+* What optional dependency configurations are defined?
+
+Example output:
+
+```
+             Dependency Sources
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Source               ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ poetry               │ 15    │ 9.9        │
+│ requirements-dev.txt │ 7     │ 4.6        │
+│ requirements.txt     │ 142   │ 94.0       │
+└──────────────────────┴───────┴────────────┘
+
+                                            Ops Versions
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Version                                                                      ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ ops                                                                          │ 47    │ 31.1       │
+│ ops < 2.0                                                                    │ 1     │ 0.7        │
+│ ops >= 1.2.0                                                                 │ 2     │ 1.3        │
+│ ops~=2.3.0                                                                   │ 1     │ 0.7        │
+│ ops~=2.8.0                                                                   │ 1     │ 0.7        │
+└──────────────────────────────────────────────────────────────────────────────┴───────┴────────────┘
+
+           Common Dependencies
+┏━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Package          ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ jsonschema       │ 80    │ 53.0       │
+│ lightkube-models │ 64    │ 42.4       │
+│ lightkube        │ 63    │ 41.7       │
+│ jinja2           │ 58    │ 38.4       │
+│ pyyaml           │ 56    │ 37.1       │
+│ tenacity         │ 56    │ 37.1       │
+│ websocket-client │ 47    │ 31.1       │
+│ requests         │ 46    │ 30.5       │
+│ cryptography     │ 41    │ 27.2       │
+│ pydantic         │ 41    │ 27.2       │
+└──────────────────┴───────┴────────────┘
+
+      Common Dependencies and Version
+┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Package            ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ pyyaml==6.0.1      │ 39    │ 25.8       │
+│ requests==2.31.0   │ 38    │ 25.2       │
+│ jsonschema         │ 37    │ 24.5       │
+│ certifi==2023.7.22 │ 36    │ 23.8       │
+│ idna==3.4          │ 36    │ 23.8       │
+└────────────────────┴───────┴────────────┘
+
+pyproject.toml Optional Dependency
+             Sections
+┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Section    ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ lib_pydeps │ 2     │ 1.3        │
+└────────────┴───────┴────────────┘
+```
 
 ### summarise_libs
 
@@ -228,6 +289,5 @@ TODO:
 
 ## To-do
 
-When was the (main branch of the) repo last updated?
-Is the charm on charmhub? If so, when was it last published?
-Properly parse the version specifiers for the dependencies (also avoid more of the FPs)
+* [ ] When was the (main branch of the) repo last updated?
+* [ ] Is the charm on charmhub? If so, when was it last published?
