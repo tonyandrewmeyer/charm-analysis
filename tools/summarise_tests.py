@@ -12,7 +12,7 @@ import pathlib
 import click
 import rich.console
 import rich.logging
-import rich.table
+from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
 
@@ -87,17 +87,6 @@ def main(cache_folder):
     report(uses_tox, total, test_imports, tox)
 
 
-def _count_and_percentage_table(title, col0_title, total, counts):
-    """Return a rich.table.Table that has a count and percentage columns."""
-    table = rich.table.Table(title=title)
-    table.add_column(col0_title)
-    table.add_column("Count")
-    table.add_column("Percentage")
-    for label, count in counts:
-        table.add_row(label, str(count), f"{(count / total * 100):.1f}")
-    return table
-
-
 def report(uses_tox, total, test_imports, tox_environments):
     """Output a report of the results to the console."""
     console = rich.console.Console()
@@ -106,7 +95,7 @@ def report(uses_tox, total, test_imports, tox_environments):
     console.print(f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox.")
     console.print()
 
-    table = _count_and_percentage_table(
+    table = count_and_percentage_table(
         "Unit Test Libraries",
         "Library",
         uses_tox,
@@ -115,7 +104,7 @@ def report(uses_tox, total, test_imports, tox_environments):
     console.print(table)
     console.print()
 
-    table = _count_and_percentage_table(
+    table = count_and_percentage_table(
         "Testing Frameworks",
         "Framework",
         uses_tox,
@@ -130,7 +119,7 @@ def report(uses_tox, total, test_imports, tox_environments):
 
     common_environments = [(env, count) for env, count in tox_environments.items()]
     common_environments.sort(key=operator.itemgetter(1), reverse=True)
-    table = _count_and_percentage_table(
+    table = count_and_percentage_table(
         "Common Tox Environments", "Environment", uses_tox, common_environments[:10]
     )
     console.print(table)

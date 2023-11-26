@@ -49,9 +49,56 @@ What optional dependency configurations are defined?
 
 ### summarise_libs
 
-What charm libs are used?
-How outdated are the libs being used?
-Does the charm provide a lib?
+Provides insight into the Charm libs that are used and provided by the charms.
+For example:
+
+```
+            Charm Lib Usage
+┏━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Number of Libs ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0              │ 30    │ 19.9       │
+│ 1              │ 28    │ 18.5       │
+│ 2              │ 19    │ 12.6       │
+│ 3              │ 16    │ 10.6       │
+│ 4              │ 11    │ 7.3        │
+│ 5              │ 11    │ 7.3        │
+│ 6              │ 13    │ 8.6        │
+│ 7              │ 10    │ 6.6        │
+│ 8              │ 7     │ 4.6        │
+│ 9              │ 4     │ 2.6        │
+│ 10             │ 1     │ 0.7        │
+│ 11             │ 1     │ 0.7        │
+├────────────────┼───────┼────────────┤
+│ Total          │ 151   │ 100.0      │
+└────────────────┴───────┴────────────┘
+
+                   Common Charm Libs
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Lib                            ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ observability_libs             │ 79    │ 52.3       │
+│ prometheus_k8s                 │ 55    │ 36.4       │
+│ grafana_k8s                    │ 47    │ 31.1       │
+│ tls_certificates_interface     │ 38    │ 25.2       │
+│ data_platform_libs             │ 37    │ 24.5       │
+│ loki_k8s                       │ 28    │ 18.5       │
+│ traefik_k8s                    │ 22    │ 14.6       │
+│ operator_libs_linux            │ 19    │ 12.6       │
+│ nginx_ingress_integrator       │ 15    │ 9.9        │
+│ grafana_agent                  │ 10    │ 6.6        │
+│ rolling_ops                    │ 9     │ 6.0        │
+│ sdcore_nrf                     │ 8     │ 5.3        │
+│ tempo_k8s                      │ 7     │ 4.6        │
+│ catalogue_k8s                  │ 7     │ 4.6        │
+│ kubeflow_dashboard             │ 7     │ 4.6        │
+│ certificate_transfer_interface │ 5     │ 3.3        │
+│ harness_extensions             │ 4     │ 2.6        │
+│ istio_pilot                    │ 4     │ 2.6        │
+│ postgresql_k8s                 │ 4     │ 2.6        │
+│ zookeeper                      │ 4     │ 2.6        │
+└────────────────────────────────┴───────┴────────────┘
+```
 
 ### summarise_metadata
 

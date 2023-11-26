@@ -3,6 +3,7 @@
 import logging
 import pathlib
 
+import rich.table
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -48,3 +49,14 @@ def iter_entries(base: pathlib.Path):
             logger.warning("Unable to find entrypoint for %s (guessed %s).", repo, entry)
             continue
         yield (repo / entry)
+
+
+def count_and_percentage_table(title, col0_title, total, counts):
+    """Return a rich.table.Table that has a count and percentage columns."""
+    table = rich.table.Table(title=title)
+    table.add_column(col0_title)
+    table.add_column("Count")
+    table.add_column("Percentage")
+    for label, count in counts:
+        table.add_row(str(label), str(count), f"{(count / total * 100):.1f}")
+    return table
