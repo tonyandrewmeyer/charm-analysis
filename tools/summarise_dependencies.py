@@ -10,12 +10,27 @@ import pathlib
 import tomllib
 
 import click
+import packaging.requirements
 import rich.console
 import rich.logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
 logger = logging.getLogger(__name__)
+
+
+def _ops_version(line: str, location: pathlib.Path):
+    """Extract out the version specifier from a requirements line."""
+    if line == "ops":
+        return "latest"
+    req = packaging.requirements.Requirement(line)
+    if req.marker:
+        logger.info("ops in %s has marker %s", location, req.marker)
+    if req.url:
+        logger.info("ops in %s is found at %s", location, req.url)
+    if req.extras:
+        logger.warning("ops in %s wants ops extras: %s", location, req.extras)
+    return str(req.specifier)
 
 
 def requirements_txt(
@@ -26,12 +41,15 @@ def requirements_txt(
 ):
     with location.open() as requirements:
         for line in requirements.readlines():
-            line = line.strip()
-            if not line:
+            line = line.split("#", 1)[0].strip()
+            if not line or line.startswith("--hash"):
                 continue
+            # Assume that if the line endswith a \ the rest is just hashes and
+            # so can be ignored here (is this a reasonable assumption?).
+            line = line.rstrip("\\")
             if ops_versions and "ops" in line:
-                ops_versions[line] += 1
-            elif not line.startswith(("--hash", "#")):
+                ops_versions[_ops_version(line, location)] += 1
+            else:
                 # There should be a cleaner way to do this.
                 all_dependencies[line.strip().split("=", 1)[0]] += 1
                 all_dependencies_pinned[line.strip()] += 1
@@ -55,7 +73,7 @@ def setup_py(
                     has_install_requires = True
                     for val in kw.value.elts:
                         if "ops" in val:
-                            ops_versions[val] += 1
+                            ops_versions[_ops_version(val, location)] += 1
                         else:
                             # There should be a cleaner way to do this.
                             all_dependencies[val.split("=", 1)[0]] += 1
@@ -80,7 +98,7 @@ def pyproject_toml(
             yield "pyproject.toml"
             for dep in data["dependencies"]:
                 if "ops" in dep:
-                    ops_versions[dep] += 1
+                    ops_versions[_ops_version(dep, location)] += 1
                 else:
                     # There should be a cleaner way to do this.
                     all_dependencies[dep.split("=", 1)[0]] += 1
@@ -123,7 +141,7 @@ def pyproject_toml(
                                 dev_dependencies[devdep] += 1
                     continue
                 if "ops" in dep:
-                    ops_versions[dep] += 1
+                    ops_versions[_ops_version(dep, location)] += 1
                 else:
                     # There should be a cleaner way to do this.
                     all_dependencies[dep.split("=", 1)[0]] += 1
