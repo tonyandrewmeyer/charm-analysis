@@ -5,6 +5,7 @@
 import collections
 import logging
 import operator
+import pathlib
 
 import click
 import rich.logging
@@ -31,7 +32,7 @@ def main(cache_folder: str):
     total = 0
     lib_count = collections.Counter()
     libs = collections.Counter()
-    for repo in iter_repositories(cache_folder):
+    for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         if (repo / "lib" / "charms").exists():
             ignored = 0
