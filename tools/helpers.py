@@ -1,5 +1,6 @@
 """Utilities common across multiple tools."""
 
+import itertools
 import logging
 import pathlib
 
@@ -9,21 +10,44 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def _iter_bundles(base: pathlib.Path):
-    """Automatically traverse the charms in a bundle."""
+def _iter_monorepo(base: pathlib.Path):
+    """Iterate through each of the charms contained in a single repository."""
     for repo in pathlib.Path(base).iterdir():
         if repo.name.startswith("."):
             continue
-        if (repo / "bundle.yaml").exists():
-            logger.info("Unbundling %s", repo)
-            yield from (repo / "charms").iterdir()
-        else:
+        # We don't have a marker for "monorepo of charms", as we do with a
+        # bundle, and we don't want to manually mark entries as monorepos, so
+        # we have to use a heuristic here to decide if this is a monorepo.
+        # For now, we'll assume that if there is either a "metadata.yaml" or
+        # "charmcraft.yaml" file inside of the subfolder, then it's a charm.
+        if (repo / "charmcraft.yaml").exists() or (repo / "metadata.yaml").exists():
+            logger.info("Found %s in presumed monorepo %s", repo.name, base)
             yield repo
+        # We'll also look for "bundle.yaml" in case there's a bundle inside of
+        # a monorepo.
+        if (repo / "bundle.yaml").exists():
+            logger.info("Found bundle %s in presumed monorepo %s", repo.name, base)
+            yield from _iter_bundles(repo)
+
+
+def _iter_non_monorepo(base: pathlib.Path):
+    """Iterate through charms in the top level folder."""
+    if (base / "bundle.yaml").exists():
+        yield from _iter_bundles(base)
+    else:
+        yield base
+
+
+def _iter_bundles(base: pathlib.Path):
+    """Automatically traverse the charms in a bundle."""
+    logger.info("Unbundling %s", base)
+    yield from (base / "charms").iterdir()
 
 
 def iter_repositories(base: pathlib.Path):
     """Iterate through all the charm folders contained in the base location."""
-    for repo in _iter_bundles(base):
+    sources = itertools.chain(_iter_non_monorepo(base), _iter_monorepo(base))
+    for repo in sources:
         if (repo / "reactive").exists():
             logger.info("Ignoring reactive charm: %s", repo)
             continue
@@ -49,6 +73,12 @@ def iter_entries(base: pathlib.Path):
             logger.warning("Unable to find entrypoint for %s (guessed %s).", repo, entry)
             continue
         yield (repo / entry)
+
+
+def iter_python_src(base: pathlib.Path):
+    """Iterate through all the Python modules contained a 'src' folder in the base location."""
+    for repo in iter_repositories(base):
+        yield from repo.glob("src/**/*.py")
 
 
 def count_and_percentage_table(title, col0_title, total, counts):
