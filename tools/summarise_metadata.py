@@ -126,7 +126,7 @@ def report(total, juju, assumes, containers, resources, relations, storages):
     console.print()
 
     # TODO:
-    # * Handle the combined file (charmcraft.yaml?).
+    # * Handle the combined file (charmcraft.yaml).
     # * We're finding hardly any Juju versions - does that mean it's optional
     #   and there's a default? Or are we missing some?
 
