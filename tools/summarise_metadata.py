@@ -5,6 +5,7 @@
 import collections
 import logging
 import operator
+import pathlib
 
 import click
 import rich.console
@@ -39,7 +40,7 @@ def main(cache_folder: str):
     storages = collections.Counter()
     devices = collections.Counter()
 
-    for repo in iter_repositories(cache_folder):
+    for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         if not (repo / "metadata.yaml").exists():
             logger.warning("Cannot find metadata.yaml for %s", repo)
