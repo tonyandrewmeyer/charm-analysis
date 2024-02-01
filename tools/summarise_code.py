@@ -4,6 +4,7 @@
 
 import ast
 import collections
+import csv
 import logging
 import pathlib
 
@@ -74,6 +75,7 @@ def defer_count(module: pathlib.Path):
 
 def relation_broken(module: pathlib.Path, handler_name: str):
     with module.open() as charm:
+        logger.info("%s has a relation-broken event handler, %s", module, handler_name)
         tree = ast.parse(charm.read())
         # Walk through the tree to get to the methods we want - there are much better ways
         # to do this.
@@ -87,13 +89,18 @@ def relation_broken(module: pathlib.Path, handler_name: str):
         for expr in body:
             for node in ast.walk(expr):
                 # Is this sufficient to check what we need to know?
-                if isinstance(node, ast.Attribute) and node.attr == "id":
-                    logger.info("Found x.id in relation-broken handler.")
+                if isinstance(node, ast.Attribute):
+                    if node.attr == "id":
+                        logger.info("Found x.id in relation-broken handler.")
+                    elif node.attr == "relation":
+                        logger.info("Found .relation in relation-broken handler.")
 
 
 @click.option("--cache-folder", default=".cache")
+@click.option("--log-defer-over", default=10)
+@click.option("--team-info", default=None, type=click.File())
 @click.command()
-def main(cache_folder):
+def main(cache_folder, log_defer_over, team_info):
     """Output simple statistics about the charm code."""
     FORMAT = "%(message)s"
     logging.basicConfig(
@@ -103,23 +110,44 @@ def main(cache_folder):
         handlers=[rich.logging.RichHandler()],
     )
 
+    # TODO: This won't work with bundles or monorepos.
+    teams = {}
+    if team_info:
+        reader = csv.DictReader(team_info)
+        for row in reader:
+            if not row["Repository"]:
+                continue
+            repo = row["Repository"].rsplit("/", 1)[1]
+            teams[repo] = row["Team"]
+
     total = 0
     events = collections.Counter()
     defers = collections.Counter()
-    for entry in iter_entries(cache_folder):
+    defers_by_team = collections.Counter()
+    for entry in iter_entries(pathlib.Path(cache_folder)):
         total += 1
         # This will have some collisions - e.g. all actions get normalised to a
         # single `event`, relation events are normalised, etc.
         repo_events = {event: method for event, method in observing(entry)}
         events.update(repo_events.keys())
-        defers[defer_count(entry)] += 1
         if "relation_broken" in repo_events:
             relation_broken(entry, repo_events["relation_broken"])
+        total_defers = sum(defer_count(module) for module in entry.parent.glob("**/*.py"))
+        # TODO: This assumes the entry is in a "src" (or otherwise named) folder.
+        defers_by_team[teams.get(entry.parent.parent.name, "Unknown")] += total_defers
 
-    report(total, events, defers)
+        if total_defers > log_defer_over:
+            logger.info("%s has %s defer() calls", entry, total_defers)
+            for module in entry.parent.glob("**/*.py"):
+                module_count = defer_count(module)
+                if module_count:
+                    logger.info("%s: %s defer() calls", module, module_count)
+        defers[total_defers] += 1
+
+    report(total, events, defers, defers_by_team)
 
 
-def report(total, events, defers):
+def report(total, events, defers, defers_by_team):
     """Output a report of the results to the console."""
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
@@ -135,6 +163,12 @@ def report(total, events, defers):
     table.add_section()
     table.add_row(
         "Total", str(sum(defers.values())), f"{(sum(defers.values()) / total * 100):.1f}"
+    )
+    console.print(table)
+    console.print()
+
+    table = count_and_percentage_table(
+        "Team", "Defer Count", sum(defers_by_team.values()), defers_by_team.items()
     )
     console.print(table)
     console.print()
