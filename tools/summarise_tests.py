@@ -15,6 +15,8 @@ import rich.logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
+logger = logging.getLogger("__name__")
+
 
 def tox_ini(location: pathlib.Path, tox: collections.Counter):
     tox_conf = configparser.ConfigParser()
@@ -65,7 +67,7 @@ def main(cache_folder):
     tox = collections.Counter()
     test_imports = collections.Counter()
     test_frameworks = collections.Counter()
-    for repo in iter_repositories(cache_folder):
+    for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         if (repo / "tox.ini").exists():
             uses_tox += 1
@@ -75,6 +77,7 @@ def main(cache_folder):
             if "ops.testing" in repo_test_imports:
                 test_frameworks["harness"] += 1
             if "scenario" in repo_test_imports:
+                logger.info("%s uses Scenario", repo)
                 test_frameworks["scenario"] += 1
             if "unittest" in repo_test_imports:
                 test_frameworks["unittest"] += 1
