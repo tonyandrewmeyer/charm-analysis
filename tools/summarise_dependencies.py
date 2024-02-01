@@ -168,7 +168,7 @@ def main(cache_folder: str):
     all_dependencies_pinned = collections.Counter()
     dev_dependencies = collections.Counter()
     optional_dependency_sections = collections.Counter()
-    for repo in iter_repositories(cache_folder):
+    for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         # Look for requirements.txt, setup.py, and pyproject.toml.
         # It's possible that a single repository has more than one of these.
