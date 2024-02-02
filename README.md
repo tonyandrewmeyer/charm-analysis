@@ -322,15 +322,71 @@ Example output:
 └───────────┴───────┴────────────┘
 ```
 
+### summarise_artifacts
+
+Attempts to answer questions like:
+
+* Which frameworks and languages are charms using (according to CharmHub)?
+* How long is it since charms have published an artifact?
+
+Example output:
+
+```
+           Frameworks
+┏━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Framework ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ operator  │ 136   │ 99.3       │
+└───────────┴───────┴────────────┘
+
+            Languages
+┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Language ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ python   │ 136   │ 99.3       │
+└──────────┴───────┴────────────┘
+
+       Newest Artifact
+┏━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Days ┃ Count ┃ Percentage ┃
+┡━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0    │ 15    │ 10.9       │
+│ 1    │ 35    │ 25.5       │
+│ 2    │ 14    │ 10.2       │
+│ 3    │ 3     │ 2.2        │
+│ 4    │ 1     │ 0.7        │
+│ 6    │ 1     │ 0.7        │
+│ 8    │ 2     │ 1.5        │
+│ 9    │ 4     │ 2.9        │
+│ 10   │ 2     │ 1.5        │
+│ 906  │ 1     │ 0.7        │
+└──────┴───────┴────────────┘
+
+       Oldest Artifact
+┏━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Days ┃ Count ┃ Percentage ┃
+┡━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 1    │ 3     │ 2.2        │
+│ 2    │ 1     │ 0.7        │
+│ 3    │ 3     │ 2.2        │
+│ 7    │ 1     │ 0.7        │
+│ 8    │ 2     │ 1.5        │
+│ 9    │ 1     │ 0.7        │
+│ 986  │ 1     │ 0.7        │
+│ 995  │ 1     │ 0.7        │
+│ 1036 │ 1     │ 0.7        │
+└──────┴───────┴────────────┘
+```
+
 ### super-tox
 
 Run a tox environment across all of the charms at once.
 
 TODO:
 
-* [ ] All at once seems too much for an average device to handle. Adjusted to a set
-  amount of concurrency, but seems to still struggle - maybe it's specific
-  charms?
+* [ ] There are a few charms that are explicitly excluded - these probably belong
+  in a configuration file.
+* [ ] Handle more types of dependency patching for using the latest version of ops.
 * [ ] Need to do more with the actual results, not just check that everything was ok.
   For example, how many tests were collected?
 * [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
@@ -340,3 +396,6 @@ TODO:
 
 * [ ] When was the (main branch of the) repo last updated?
 * [ ] Is the charm on charmhub? If so, when was it last published?
+* [ ] Check ['definition of great'](https://docs.google.com/document/d/1_2jTMSAaHRSX8B08upqOfhYyxAg9LwmcoS8eD-uVHx0/edit#heading=h.xc0m9jobc7ma)
+* [ ] I think there's a bug in the monorepo handling where it thinks that the cache folder is a monorepo.
+* [ ] It seems like mixing the charmhub info and the regular info would be informative.
