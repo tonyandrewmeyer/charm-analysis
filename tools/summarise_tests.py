@@ -28,8 +28,8 @@ def tox_ini(location: pathlib.Path, tox: collections.Counter):
 
 def find_imports(module):
     """Iterate through the names of the modules imported by the specified module."""
-    with module.open() as setup:
-        tree = ast.parse(setup.read())
+    with module.open() as raw:
+        tree = ast.parse(raw.read())
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             yield node.module
@@ -85,6 +85,13 @@ def main(cache_folder):
                 test_frameworks["pytest"] += 1
             if "pytest_operator.plugin" in repo_test_imports:
                 test_frameworks["pytest_operator"] += 1
+            if "zaza" in repo_test_imports:
+                # TODO: I'm not sure if this is always required - it seems like
+                # there is always a tests.yaml file, but not at the top level,
+                # and there are other reasons to have a tests.yaml file. The
+                # requirements file should have zaza, so maybe this is sufficient?
+                logger.info("%s uses Zaza", repo)
+                test_frameworks["zaza"] += 1
             test_imports.update(repo_test_imports)
 
     report(uses_tox, total, test_imports, tox)
@@ -115,6 +122,7 @@ def report(uses_tox, total, test_imports, tox_environments):
             ("Harness", test_imports["ops.testing"]),
             ("Scenario", test_imports["scenario"]),
             ("pytest-operator", test_imports["pytest_operator.plugin"]),
+            ("zaza", test_imports["zaza"]),
         ),
     )
     console.print(table)
@@ -131,8 +139,6 @@ def report(uses_tox, total, test_imports, tox_environments):
     # TODO:
     # * 20 have a "scenario" tox environment, but only 15 are importing scenario:
     #   one of those numbers is surely wrong.
-    # * There's a third unit test framework for charms, but I can't remember the
-    #   name or where I would have that written down.
 
 
 if __name__ == "__main__":
