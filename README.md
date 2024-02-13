@@ -413,7 +413,7 @@ TODO:
   For example, how many tests were collected?
 * [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
 * [x] Should be able to target a subset of charms (maybe the above would do this?)
-* [ ] Automate running this in a lxd (or whatever) VM, to decrease the risk.
+* [x] Automate running this in a lxd (or whatever) VM, to decrease the risk.
 
 ## To-do
 

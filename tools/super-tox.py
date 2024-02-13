@@ -9,10 +9,13 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tomllib
+import typing
 
 import click
 import packaging.requirements
+import pylxd
 import rich.logging
 
 logger = logging.getLogger(__name__)
@@ -155,6 +158,7 @@ async def super_tox(
     ops_source_branch: str | None,
     repo_re: str,
     fresh_tox: bool,
+    mode: typing.Literal["local"] | typing.Literal["lxd"],
 ):
     """Run `tox -e {environment}` in each repository's folder."""
     results = []
@@ -174,7 +178,7 @@ async def super_tox(
     tasks = []
     for i in range(workers):
         task = asyncio.create_task(
-            worker(f"worker-{i}", queue, conf, ops_source, ops_source_branch)
+            worker(f"worker-{i}", queue, conf, ops_source, ops_source_branch, mode)
         )
         tasks.append(task)
     await queue.join()
@@ -196,25 +200,41 @@ async def super_tox(
     print(f"{success_count} out of {len(results)} ({success_count/len(results)}%) runs passed.")
 
 
-async def worker(name, queue, conf, ops_source: str, ops_source_branch: str | None):
+async def worker(
+    name,
+    queue,
+    conf,
+    ops_source: str,
+    ops_source_branch: str | None,
+    mode: typing.Literal["local"] | typing.Literal["lxd"],
+):
     logger.info("Starting worker: %s", name)
     ignore = conf.get("ignore", {})
     while True:
-        repo, environment, results = await queue.get()
+        try:
+            repo, environment, results = await queue.get()
+        except asyncio.CancelledError:
+            # We don't need to do anything any more.
+            break
         if repo.name in ignore.get("expensive", ()):
             logger.info("Skipping %s - too expensive", repo)
+            queue.task_done()
             continue
         elif repo.name in ignore.get("manual", ()):
             logger.info("Skipping %s - requires manual intervention", repo)
+            queue.task_done()
             continue
         elif repo.name in ignore.get("requirements", ()):
             logger.info("Skipping %s - cannot install dependencies", repo)
+            queue.task_done()
             continue
         elif repo.name in ignore.get("not_ops", ()):
             logger.info("Skipping %s - does not use ops", repo)
+            queue.task_done()
             continue
         elif repo.name in ignore.get("misc", ()):
             logger.info("Skipping %s - in misc ignore list", repo)
+            queue.task_done()
             continue
 
         if (
@@ -234,15 +254,60 @@ async def worker(name, queue, conf, ops_source: str, ops_source_branch: str | No
             # make it generic.
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
-            try:
-                if ops_source:
-                    with patch_ops(repo, ops_source, ops_source_branch):
+            if mode == "local":
+                try:
+                    if ops_source:
+                        with patch_ops(repo, ops_source, ops_source_branch):
+                            await run_tox(repo, environment, results)
+                    else:
                         await run_tox(repo, environment, results)
-                else:
-                    await run_tox(repo, environment, results)
-            except Exception as e:
-                logger.error("Failed running tox: %s", e, exc_info=True)
+                except Exception as e:
+                    logger.error("Failed running tox: %s", e, exc_info=True)
+            elif mode == "lxd":
+                # TODO
+                pass
         queue.task_done()
+
+
+def get_lxd_instance(name: str, image_alias: str, create: bool = False):
+    """Get a local lxd instance by the specified name.
+
+    If create is True, then if there is no matching instance, then create one
+    using the provided image alias."""
+    client = pylxd.Client()
+    try:
+        return client.instances.get(name)
+    except pylxd.exceptions.NotFound:
+        if not create:
+            raise
+    logger.info("Creating LXD instance %s (%s)", name, image_alias)
+    config = {"name": name, "source": {"type": "image", "alias": image_alias}}
+    return client.instances.create(config, wait=True)
+
+
+@contextlib.contextmanager
+def lxd_instance(name: str, cache_folder: str, image_alias: str, *, delete_on_exit: bool = True):
+    instance = get_lxd_instance(name, image_alias, create=True)
+    try:
+        if instance.status != "Running":
+            logger.info("Starting lxd instance %s", instance.name)
+            instance.start()
+        logger.info("Copying charm-analysis to the instance")
+        me = pathlib.Path(__file__).parent.parent
+        instance.files.recursive_put(str(me), "charm-analysis")
+        # Copy the cache to the instance.
+        if not cache_folder.is_relative_to(me):
+            logger.info("Copying cache to the instance")
+            instance.files.recursive_put(str(cache_folder), "charm-analysis/.cache")
+            cache_folder = ".cache"
+        yield instance
+    finally:
+        if instance.status == "Running":
+            logger.info("Stopping lxd instance %s", instance.name)
+            instance.stop()
+        if delete_on_exit:
+            logger.info("Deleting lxd instance %s", instance.name)
+            instance.delete()
 
 
 @click.option("--workers", default=3, type=click.IntRange(1))
@@ -260,6 +325,14 @@ async def worker(name, queue, conf, ops_source: str, ops_source_branch: str | No
     default="info",
     type=click.Choice(["debug", "info", "warning", "error", "criticial"], case_sensitive=False),
 )
+@click.option(
+    "--mode",
+    default="local",
+    type=click.Choice(["local", "lxd", "lxd-per-tox"], case_sensitive=False),
+)
+@click.option("--lxd-name", default="super-tox")
+@click.option("--lxd-image-alias", default="ubuntu-22.04")
+@click.option("--keep-lxd-instance/--no-keep-lxd-instance", default=False)
 @click.option("--repo", default=".*")
 @click.option("--fresh-tox/--no-fresh-tox", default=False)
 @click.option("-e", default=None, type=click.STRING)
@@ -273,6 +346,10 @@ def main(
     log_level: str,
     repo: str,
     fresh_tox: bool,
+    mode: str,
+    lxd_name: str,
+    lxd_image_alias: str,
+    keep_lxd_instance: bool,
     config: pathlib.Path,
 ):
     """Run the specified tox environment in all of the charm repositories.
@@ -288,21 +365,49 @@ def main(
         handlers=[rich.logging.RichHandler()],
     )
 
-    with config.open("rb") as raw:
-        conf = tomllib.load(raw)
+    if mode in ("local", "lxd-per-tox"):
+        with config.open("rb") as raw:
+            conf = tomllib.load(raw)
 
-    asyncio.run(
-        super_tox(
-            conf,
-            pathlib.Path(cache_folder),
-            e,
-            workers,
-            ops_source,
-            ops_source_branch,
-            repo,
-            fresh_tox,
+        asyncio.run(
+            super_tox(
+                conf,
+                pathlib.Path(cache_folder),
+                e,
+                workers,
+                ops_source,
+                ops_source_branch,
+                repo,
+                fresh_tox,
+                mode,
+            )
         )
-    )
+    elif mode == "lxd":
+        cmd = [
+            "charm-analysis/super-tox.py",
+            f"--config={config}",
+            f"--cache-folder={cache_folder}",
+            "-e",
+            e,
+            f"--workers={workers}",
+            f"--ops-source={ops_source}",
+            f"repo={repo}",
+            f"--log-level={log_level}",
+        ]
+        if ops_source_branch:
+            cmd.append(f"--ops-source-branch={ops_source_branch}")
+        if fresh_tox:
+            cmd.append("--fresh-tox")
+        with lxd_instance(
+            lxd_name,
+            cache_folder,
+            lxd_image_alias,
+            delete_on_exit=not keep_lxd_instance,
+        ) as lxd:
+            exit_code, stdout, stderr = lxd.execute(cmd)
+        print(stdout, file=sys.stdout)
+        print(stderr, file=sys.stderr)
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
