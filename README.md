@@ -382,15 +382,38 @@ Example output:
 
 Run a tox environment across all of the charms at once.
 
+A configuration file can be provided to skip repositories if required, in the
+form:
+
+```toml
+[ignore]
+
+# Intended for repos where it's too expensive to run the tests.
+expensive = ["repo1", "repo2"]
+
+# Intended for tests that interaction.
+manual = ["repo3"]
+
+# Intended for tests that need dependencies that cannot be installed.
+requirements = ["repo4", "repo5"]
+
+# Intended for tests that don't use the `ops` library.
+not_ops = ["repo6"]
+
+# Intended for any other cases.
+misc = ["repo7"]
+```
+
 TODO:
 
-* [ ] There are a few charms that are explicitly excluded - these probably belong
+* [x] There are a few charms that are explicitly excluded - these probably belong
   in a configuration file.
-* [ ] Handle more types of dependency patching for using the latest version of ops.
+* [x] Handle more types of dependency patching for using the latest version of ops.
 * [ ] Need to do more with the actual results, not just check that everything was ok.
   For example, how many tests were collected?
 * [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
-* [ ] Should be able to target a subset of charms (maybe the above would do this?)
+* [x] Should be able to target a subset of charms (maybe the above would do this?)
+* [ ] Automate running this in a lxd (or whatever) VM, to decrease the risk.
 
 ## To-do
 
