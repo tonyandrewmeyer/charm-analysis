@@ -37,16 +37,22 @@ import rich.logging
 logger = logging.getLogger(__name__)
 
 
-async def clone(dest_folder: pathlib.Path, name: str, repository: str):
+async def clone(dest_folder: pathlib.Path, name: str, repository: str, branch: str):
     """Ensure that a clone of the repository exists."""
     logger.info("Cloning %s from %s into %s", name, repository, dest_folder.resolve())
-    clone = await asyncio.create_subprocess_exec(
+    args = [
         "git",
         "clone",
         "--depth=1",
+        "--shallow-submodules",
         "--single-branch",
         "--no-tags",
         "--quiet",
+    ]
+    if branch:
+        args.extend(["--branch", branch])
+    clone = await asyncio.create_subprocess_exec(
+        *args,
         repository,
         cwd=dest_folder.parent.name,
     )
@@ -74,13 +80,23 @@ async def process_input(input: csv.DictReader, cache_folder: pathlib.Path):
                 continue
             name = row["Charm Name"]
             repository = row["Repository"]
+            branch = row.get("Branch (if not the default)")
             # Convert from HTTP to git@ to more easily get private repositories.
             repository = repository.replace("https://github.com/", "git@github.com:")
-            repo_folder = cache_folder / repository.rstrip("/").rsplit("/", 1)[1]
+            base_name = repository.rstrip("/").rsplit("/", 1)[1]
+            if branch:
+                repo_folder = cache_folder / f"{base_name}-{branch}"
+            else:
+                repo_folder = cache_folder / base_name
             if repo_folder.exists():
+                # We don't do a 'checkout' / 'switch' here, assuming that the
+                # user has either not manually adjusted the cache, or that if
+                # they have they want it to be that way.
+                # TODO: reconisder this - maybe the branch in the input file
+                # has changed?
                 tg.create_task(pull(repo_folder, name))
             else:
-                tg.create_task(clone(repo_folder, name, repository))
+                tg.create_task(clone(repo_folder, name, repository, branch))
 
 
 @click.option("--cache-folder", default=".cache")
