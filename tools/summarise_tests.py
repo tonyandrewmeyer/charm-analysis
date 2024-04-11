@@ -18,12 +18,18 @@ from helpers import iter_repositories
 logger = logging.getLogger("__name__")
 
 
-def tox_ini(location: pathlib.Path, tox: collections.Counter):
+def tox_ini(location: pathlib.Path, tox: collections.Counter, static: collections.Counter):
     tox_conf = configparser.ConfigParser()
     tox_conf.read(location)
     for section in tox_conf.sections():
         if section.startswith("testenv:"):
             tox[section.split(":", 1)[1]] += 1
+            try:
+                commands = tox_conf.get(section, "commands")
+            except configparser.NoOptionError:
+                continue
+            if "pyright" in commands or "mypy" in commands:
+                static[section.split(":", 1)[1]] += 1
 
 
 def find_imports(module):
@@ -65,13 +71,14 @@ def main(cache_folder):
     total = 0
     uses_tox = 0
     tox = collections.Counter()
+    tox_static = collections.Counter()
     test_imports = collections.Counter()
     test_frameworks = collections.Counter()
     for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         if (repo / "tox.ini").exists():
             uses_tox += 1
-            tox_ini(repo / "tox.ini", tox)
+            tox_ini(repo / "tox.ini", tox, tox_static)
         if (repo / "tests").exists():
             repo_test_imports = set(find_test_imports(repo / "tests"))
             if "ops.testing" in repo_test_imports:
@@ -94,10 +101,10 @@ def main(cache_folder):
                 test_frameworks["zaza"] += 1
             test_imports.update(repo_test_imports)
 
-    report(uses_tox, total, test_imports, tox)
+    report(uses_tox, total, test_imports, tox, tox_static)
 
 
-def report(uses_tox, total, test_imports, tox_environments):
+def report(uses_tox, total, test_imports, tox_environments, tox_static_environments):
     """Output a report of the results to the console."""
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
@@ -139,6 +146,14 @@ def report(uses_tox, total, test_imports, tox_environments):
     # TODO:
     # * 20 have a "scenario" tox environment, but only 15 are importing scenario:
     #   one of those numbers is surely wrong.
+
+    static_environments = [(env, count) for env, count in tox_static_environments.items()]
+    static_environments.sort(key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table(
+        "Static Checking Tox Environments", "Environment", uses_tox, static_environments
+    )
+    console.print(table)
+    console.print()
 
 
 if __name__ == "__main__":
