@@ -71,9 +71,7 @@ def report(total, repo_lib_count, lib_usage):
 
     common_libs = [(env, count) for env, count in lib_usage.items()]
     common_libs.sort(key=operator.itemgetter(1), reverse=True)
-    table = count_and_percentage_table(
-        "Common Charm Libs", "Lib", total, common_libs[:20]
-    )
+    table = count_and_percentage_table("Common Charm Libs", "Lib", total, common_libs[:20])
     console.print(table)
     console.print()
 
