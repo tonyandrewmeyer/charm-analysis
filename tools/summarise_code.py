@@ -162,7 +162,9 @@ def report(total, events, defers, defers_by_team):
     table = count_and_percentage_table("event.defer() Frequency", "Frequency", total, freq)
     table.add_section()
     table.add_row(
-        "Total", str(sum(defers.values())), f"{(sum(defers.values()) / total * 100):.1f}"
+        "Total",
+        str(sum(defers.values())),
+        f"{(sum(defers.values()) / total * 100):.1f}",
     )
     console.print(table)
     console.print()
