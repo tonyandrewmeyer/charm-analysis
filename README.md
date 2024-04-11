@@ -414,6 +414,8 @@ TODO:
 * [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
 * [x] Should be able to target a subset of charms (maybe the above would do this?)
 * [x] Automate running this in a lxd (or whatever) VM, to decrease the risk.
+* [ ] It would be good to also run the tests against scenario, pytest-operator (maybe others), even though those are not charms - figure out the best way to do that.
+* [ ] It would be very handy to be able to say "compare this version of ops and this version and list the tests that fail/pass only in one case"
 
 ## To-do
 
@@ -422,3 +424,5 @@ TODO:
 * [ ] Check ['definition of great'](https://docs.google.com/document/d/1_2jTMSAaHRSX8B08upqOfhYyxAg9LwmcoS8eD-uVHx0/edit#heading=h.xc0m9jobc7ma)
 * [ ] I think there's a bug in the monorepo handling where it thinks that the cache folder is a monorepo.
 * [ ] It seems like mixing the charmhub info and the regular info would be informative.
+* [ ] Should add the repo for the tutorial so we don't break that (and add repos for any other significant docs?)
+* [ ] Can I hook up doctest to the super-tox type system?
