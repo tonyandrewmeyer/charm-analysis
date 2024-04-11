@@ -28,6 +28,8 @@ def tox_ini(location: pathlib.Path, tox: collections.Counter, static: collection
                 commands = tox_conf.get(section, "commands")
             except configparser.NoOptionError:
                 continue
+            # This has FPs, e.g. "copyright", but is good enough for now.
+            # It could maybe be a re with `\bpyright\b` or similar.
             if "pyright" in commands or "mypy" in commands:
                 static[section.split(":", 1)[1]] += 1
 
