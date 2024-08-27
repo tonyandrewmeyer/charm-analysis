@@ -9,3 +9,4 @@ venv
 .cache
 *.log
 super-tox.toml
+.*.swp
