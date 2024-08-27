@@ -5,6 +5,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 import pathlib
 import re
 import shutil
@@ -35,18 +36,36 @@ def _patch_requirements_file(
             # TODO: There must be a proper way to tokenise the requirements file?
             if not line or line.startswith("--hash"):
                 continue
-            # TODO: This should probably attempt to handle someone having
-            # operator from git, at least with canonical/operator, or maybe
-            # anything with the name "operator" (presumably most forks keep
-            # the name).
+            # TODO: Should this be more generic, perhaps assuming that forks
+            # will keep the "operator" name and matching any of those?
+            # Technically, it ought to handle the optional "#" better too, in
+            # case there is some "canonical/operator-x" library.
+            # It should also handle "ops @ git+..." as a format.
+            if line.startswith("git+https://github.com/canonical/operator"):
+                continue
             if line.startswith("git+https://"):
-                logger.debug("Not considering %s in requirements patching %s", line, requirements)
+                logger.debug(
+                    "Not considering %s in requirements patching %s", line, requirements
+                )
+                adjusted.append(line)
+                continue
+            if line.startswith("-r "):
+                # We could recursively work through each of these files.
+                # In practice, it doesn't seem that any of the charms have ops
+                # pulled in via an `-r` directive, however.
+                logger.debug(
+                    "Ignoring indirect dependencies from %s when patching %s",
+                    line,
+                    requirements,
+                )
                 adjusted.append(line)
                 continue
             try:
                 req = packaging.requirements.Requirement(line)
             except packaging.requirements.InvalidRequirement:
-                logger.error("Unable to understand requirement %r in %s", line, requirements)
+                logger.error(
+                    "Unable to understand requirement %r in %s", line, requirements
+                )
                 continue
             if req.name != "ops":
                 adjusted.append(line)
@@ -67,8 +86,14 @@ def patch_ops(location: pathlib.Path, ops_source: str, ops_source_branch: str | 
         original = _patch_requirements_file(requirements, ops_source, ops_source_branch)
         # Annoyingly, sometimes there's also a requirements-*.txt file that also
         # has an ops dependency, so patch those as well.
+        # We could perhaps parse the tox.ini file to find the appropriate
+        # dependency declarations matching the specified environment (or all
+        # environments, if one isn't), but this seems sufficient for now.
         extras = {}
-        for fn in requirements.glob("requirements-*.txt"):
+        for fn in requirements.parent.glob("requirements-*.txt"):
+            extras[fn] = _patch_requirements_file(fn, ops_source, ops_source_branch)
+        # Also, in some cases, requirements*.in files.
+        for fn in requirements.parent.glob("requirements*.in"):
             extras[fn] = _patch_requirements_file(fn, ops_source, ops_source_branch)
         try:
             yield requirements
@@ -115,35 +140,55 @@ def patch_ops(location: pathlib.Path, ops_source: str, ops_source_branch: str | 
         )
 
 
-async def run_tox(location: pathlib.Path, environment: str | None, results: list):
+async def run_tox(
+    location: pathlib.Path,
+    environment: str | None,
+    results: list,
+    mode: typing.Literal["local"] | typing.Literal["lxd-per-tox"],
+):
     """Run the specified tox environment in the given path."""
     logger.info("Running %s in %s", environment, location)
     args = ["tox"]
     if environment:
         args.extend(["-e", environment])
-    tox = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=location.resolve(),
-    )
-    stdout, stderr = await tox.communicate()
-    if tox.returncode != 0:
+
+    if mode == "local":
+        tox = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=location.resolve(),
+        )
+        stdout, stderr = await tox.communicate()
+        returncode = tox.returncode
+    else:
+        # TODO: Handle: config, cache folder, ops patching (higher than this!), fresh tox, lxd name, image alias, keeping instance
+        # Provide a partial to the method.
+        with lxd_instance(
+            f"{lxd_name}-{location.name}",
+            pathlib.Path(cache_folder),
+            lxd_image_alias,
+            delete_on_exit=not keep_lxd_instance,
+        ) as lxd:
+            returncode, stdout, stderr = lxd.execute(args)
+    if returncode != 0:
         if stdout.strip():
             # This is potentially useful, but it's so verbose that it just
             # pollutes the log. It's simpler to just re-run tox manually in that
             # repo to get the output.
             # TODO: There must be a better solution here, like sending it to
             # somewhere it can be accessed in a handy format?
+            # logger.info("tox failed:%s in %s: %r", environment, location, stdout)
             pass
-        #            logger.info("tox failed:%s in %s: %r", environment, location, stdout)
         if stderr.strip():
             logger.error("Errors from tox:%s in %s: %r", environment, location, stderr)
     # TODO: Should do more than this - does everything have a coverage report?
     # Can we get totals reliably?
-    passed = tox.returncode == 0
+    passed = returncode == 0
     if passed:
         logger.info("%s: passed", location)
+    elif returncode == 254:
+        logger.info("No %s environment found in %s", environment, location)
     else:
         logger.warning("%s did not pass", location)
     results.append({"passed": passed})
@@ -158,7 +203,9 @@ async def super_tox(
     ops_source_branch: str | None,
     repo_re: str,
     fresh_tox: bool,
-    mode: typing.Literal["local"] | typing.Literal["lxd"],
+    mode: typing.Literal["local"] | typing.Literal["lxd-per-tox"],
+    git_pull: bool,
+    remove_local_changes: bool,
 ):
     """Run `tox -e {environment}` in each repository's folder."""
     results = []
@@ -173,6 +220,35 @@ async def super_tox(
             tox_cache = repo / ".tox"
             if tox_cache.exists():
                 shutil.rmtree(str(tox_cache))
+        if remove_local_changes:
+            git = subprocess.Popen(
+                ["git", "checkout", "."],
+                cwd=repo.resolve(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out, err = git.communicate()
+            logger.debug(
+                "`git checkout .` in %s: stdout %r, stderr: %s", repo, out, err
+            )
+            if git.returncode != 0:
+                logger.error("`git checkout .` in %s failed.", repo)
+        # Unlike `checkout .`, `pull` connects to the remote, so it might be
+        # better to put this in the async worker, rather than blocking starting
+        # off all the jobs to do it. Alternatively, maybe get rid of this option
+        # and just make use of `tools/get_charms.py`, which already knows how to
+        # do this very quickly.
+        if git_pull:
+            git = subprocess.Popen(
+                ["git", "pull"],
+                cwd=repo.resolve(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out, err = git.communicate()
+            logger.debug("`git pull` in %s: stdout %r, stderr: %s", repo, out, err)
+            if git.returncode != 0:
+                logger.error("`git pull` in %s failed: %s", repo, err)
         queue.put_nowait((repo, environment, results))
 
     tasks = []
@@ -197,7 +273,9 @@ async def super_tox(
             logger.error("Unable to process result: %s", e, exc_info=True)
             continue
         success_count += 1
-    print(f"{success_count} out of {len(results)} ({success_count/len(results)}%) runs passed.")
+    print(
+        f"{success_count} out of {len(results)} ({success_count / len(results)}%) runs passed."
+    )
 
 
 async def worker(
@@ -254,18 +332,14 @@ async def worker(
             # make it generic.
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
-            if mode == "local":
-                try:
-                    if ops_source:
-                        with patch_ops(repo, ops_source, ops_source_branch):
-                            await run_tox(repo, environment, results)
-                    else:
-                        await run_tox(repo, environment, results)
-                except Exception as e:
-                    logger.error("Failed running tox: %s", e, exc_info=True)
-            elif mode == "lxd":
-                # TODO
-                pass
+            try:
+                if ops_source:
+                    with patch_ops(repo, ops_source, ops_source_branch):
+                        await run_tox(repo, environment, results, mode)
+                else:
+                    await run_tox(repo, environment, results, mode)
+            except Exception as e:
+                logger.error("Failed running tox: %s", e, exc_info=True)
         queue.task_done()
 
 
@@ -285,26 +359,57 @@ def get_lxd_instance(name: str, image_alias: str, create: bool = False):
     return client.instances.create(config, wait=True)
 
 
+def lxd_exists(instance, filename: str) -> bool:
+    """Return true iff the filename exists on the instance."""
+    return instance.execute(["stat", filename]).exit_code == 0
+
+
+def sync_to_lxd(instance, source: pathlib.Path, destination: str):
+    """Recursively copy the source to the destination inside of the instance."""
+    # TODO: This assumes that there aren't edges cases like the path exists
+    # in the instance, but it's a file there and a directory locally.
+    for item in source.iterdir():
+        item_destination = os.path.join(destination, item.name)
+        if not lxd_exists(instance, str(item)):
+            # We can just copy it.
+            instance.files.recursive_put(str(item), item_destination)
+        elif item.is_file():
+            # If it's a file, we can just replace it.
+            instance.files.delete(item_destination)
+            instance.files.put(str(item), item_destination)
+        else:
+            sync_to_lxd(instance, item, item_destination)
+
+
 @contextlib.contextmanager
-def lxd_instance(name: str, cache_folder: str, image_alias: str, *, delete_on_exit: bool = True):
+def lxd_instance(
+    name: str,
+    cache_folder: pathlib.Path,
+    image_alias: str,
+    *,
+    delete_on_exit: bool = True,
+):
     instance = get_lxd_instance(name, image_alias, create=True)
     try:
         if instance.status != "Running":
             logger.info("Starting lxd instance %s", instance.name)
             instance.start()
+        # TODO: Ideally, the two copies would really be syncs, to speed things
+        # up when the instance already exists, but without missing any changes
+        # since the initial copy.
         logger.info("Copying charm-analysis to the instance")
         me = pathlib.Path(__file__).parent.parent
-        instance.files.recursive_put(str(me), "charm-analysis")
+        sync_to_lxd(instance, me, "charm-analysis")
         # Copy the cache to the instance.
         if not cache_folder.is_relative_to(me):
             logger.info("Copying cache to the instance")
-            instance.files.recursive_put(str(cache_folder), "charm-analysis/.cache")
-            cache_folder = ".cache"
+            sync_to_lxd(instance, cache_folder, "charm-analysis/.cache")
         yield instance
     finally:
         if instance.status == "Running":
             logger.info("Stopping lxd instance %s", instance.name)
             instance.stop()
+        logger.info("Instance status: %s", instance.status)
         if delete_on_exit:
             logger.info("Deleting lxd instance %s", instance.name)
             instance.delete()
@@ -323,7 +428,9 @@ def lxd_instance(name: str, cache_folder: str, image_alias: str, *, delete_on_ex
 @click.option(
     "--log-level",
     default="info",
-    type=click.Choice(["debug", "info", "warning", "error", "criticial"], case_sensitive=False),
+    type=click.Choice(
+        ["debug", "info", "warning", "error", "critical"], case_sensitive=False
+    ),
 )
 @click.option(
     "--mode",
@@ -333,6 +440,8 @@ def lxd_instance(name: str, cache_folder: str, image_alias: str, *, delete_on_ex
 @click.option("--lxd-name", default="super-tox")
 @click.option("--lxd-image-alias", default="ubuntu-22.04")
 @click.option("--keep-lxd-instance/--no-keep-lxd-instance", default=False)
+@click.option("--git-pull/--no-git-pull", default=False)
+@click.option("--remove-local-changes/--no-remove-local-changes", default=False)
 @click.option("--repo", default=".*")
 @click.option("--fresh-tox/--no-fresh-tox", default=False)
 @click.option("-e", default=None, type=click.STRING)
@@ -350,6 +459,8 @@ def main(
     lxd_name: str,
     lxd_image_alias: str,
     keep_lxd_instance: bool,
+    git_pull: bool,
+    remove_local_changes: bool,
     config: pathlib.Path,
 ):
     """Run the specified tox environment in all of the charm repositories.
@@ -380,13 +491,15 @@ def main(
                 repo,
                 fresh_tox,
                 mode,
+                git_pull,
+                remove_local_changes,
             )
         )
     elif mode == "lxd":
         cmd = [
-            "charm-analysis/super-tox.py",
+            "/charm-analysis/super-tox.py",
             f"--config={config}",
-            f"--cache-folder={cache_folder}",
+            f"--cache-folder={cache_folder}",  # TODO: This needs to adjust in some cases.
             "-e",
             e,
             f"--workers={workers}",
@@ -398,9 +511,13 @@ def main(
             cmd.append(f"--ops-source-branch={ops_source_branch}")
         if fresh_tox:
             cmd.append("--fresh-tox")
+        if remove_local_changes:
+            cmd.append("--remove-local-changes")
+        if git_pull:
+            cmd.append("--git-pull")
         with lxd_instance(
             lxd_name,
-            cache_folder,
+            pathlib.Path(cache_folder),
             lxd_image_alias,
             delete_on_exit=not keep_lxd_instance,
         ) as lxd:
