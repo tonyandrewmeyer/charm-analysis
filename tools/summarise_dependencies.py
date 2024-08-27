@@ -66,7 +66,10 @@ def setup_py(
     with location.open() as setup:
         tree = ast.parse(setup.read())
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or getattr(node.func, "id", None) != "setup":
+            if (
+                not isinstance(node, ast.Call)
+                or getattr(node.func, "id", None) != "setup"
+            ):
                 continue
             for kw in node.keywords:
                 if kw.arg == "install_requires":
@@ -135,9 +138,9 @@ def pyproject_toml(
                             "functional-tests",
                             "static-{charm, lib}",
                         ):
-                            for devdep in data["tool"]["poetry"]["dependencies"]["group"][
-                                section
-                            ].get("dependencies", ()):
+                            for devdep in data["tool"]["poetry"]["dependencies"][
+                                "group"
+                            ][section].get("dependencies", ()):
                                 dev_dependencies[devdep] += 1
                     continue
                 if "ops" in dep:
@@ -248,7 +251,9 @@ def report(
 
     common_deps = [(env, count) for env, count in all_dependencies.items()]
     common_deps.sort(key=operator.itemgetter(1), reverse=True)
-    table = count_and_percentage_table("Common Dependencies", "Package", total, common_deps[:10])
+    table = count_and_percentage_table(
+        "Common Dependencies", "Package", total, common_deps[:100]
+    )
     console.print(table)
     console.print()
 
