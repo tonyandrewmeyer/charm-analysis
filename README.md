@@ -416,6 +416,8 @@ TODO:
 * [x] Automate running this in a lxd (or whatever) VM, to decrease the risk.
 * [ ] It would be good to also run the tests against scenario, pytest-operator (maybe others), even though those are not charms - figure out the best way to do that.
 * [ ] It would be very handy to be able to say "compare this version of ops and this version and list the tests that fail/pass only in one case"
+* [ ] Ideally, we could specify which version of Python to use in tox - this would require either adjusting the tox.ini file to specify the base Python or perhaps we just specify an exact path to tox, and rely on it being installed with the version we want?
+* [ ] A lot of tests seem to fail with Python 3.12 - is this the charms, the tests, tox, super-tox, ... ?
 
 ## To-do
 
