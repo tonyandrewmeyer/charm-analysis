@@ -49,9 +49,7 @@ class Settings:
     sample: int
 
 
-settings = Settings(
-    None, None, None, None, None, None, None, None, None, None, None, None, None, None
-)  # type: ignore
+settings: Settings = None  # type: ignore
 
 
 def _patch_requirements_file(requirements: pathlib.Path):
@@ -432,6 +430,14 @@ def lxd_instance(name: str, *, delete_on_exit: bool = True):
             instance.delete()
 
 
+def fixme(f):
+    def inner(*args, **kwargs):
+        print(args, kwargs)
+        return f(*args, **kwargs)
+
+    return inner
+
+
 @click.option("--workers", default=lambda: os.cpu_count() or 3, type=click.IntRange(1))
 @click.option("--cache-folder", default=".cache")
 @click.option(
@@ -468,21 +474,10 @@ def lxd_instance(name: str, *, delete_on_exit: bool = True):
 def main(
     cache_folder: str,
     e: str,
-    workers: int,
-    ops_source: str,
-    ops_source_branch: str | None,
     log_level: str,
     repo: str,
-    fresh_tox: bool,
-    mode: str,
-    lxd_name: str,
-    lxd_image_alias: str,
-    keep_lxd_instance: bool,
-    git_pull: bool,
-    remove_local_changes: bool,
     config: pathlib.Path,
-    verbose: bool,
-    sample: int,
+    **kwargs,
 ):
     """Run the specified tox environment in all of the charm repositories.
 
@@ -497,37 +492,8 @@ def main(
         handlers=[rich.logging.RichHandler()],
     )
 
-    assert mode in ("local", "lxd", "lxd-per-tox")
-    settings.mode = mode
-    settings.lxd_name = lxd_name
-    settings.lxd_image_alias = lxd_image_alias
-    settings.keep_lxd_instance = keep_lxd_instance
-    settings.cache_folder = pathlib.Path(cache_folder)
-    settings.ops_source = ops_source
-    settings.ops_source_branch = ops_source_branch
-    settings.remove_local_changes = remove_local_changes
-    settings.git_pull = git_pull
-    settings.repo_re = repo
-    settings.fresh_tox = fresh_tox
-    settings.workers = workers
-    settings.verbose = verbose
-    settings.sample = sample
-    del (
-        mode,
-        lxd_name,
-        lxd_image_alias,
-        keep_lxd_instance,
-        cache_folder,
-        ops_source,
-        ops_source_branch,
-        remove_local_changes,
-        git_pull,
-        repo,
-        fresh_tox,
-        workers,
-        verbose,
-        sample,
-    )
+    global settings
+    settings = Settings(**kwargs, cache_folder=pathlib.Path(cache_folder), repo_re=repo)
 
     if settings.mode in ("local", "lxd-per-tox"):
         with config.open("rb") as raw:
