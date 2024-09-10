@@ -466,8 +466,8 @@ def fixme(f):
 @click.option("--repo", default=".*")
 @click.option("--fresh-tox/--no-fresh-tox", default=False)
 @click.option("-e", default=None, type=click.STRING)
-@click.option("--verbose/--no-verbose", default=False)
-@click.option("--sample", default=0)
+@click.option("--verbose/--no-verbose", default=False, help="additional output")
+@click.option("--sample", default=0, help="try to run only this many repositories")
 @click.command()
 def main(
     cache_folder: str,
