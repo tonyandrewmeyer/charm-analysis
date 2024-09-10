@@ -31,15 +31,13 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class Settings:
-    mode: (
-        typing.Literal["local"] | typing.Literal["lxd"] | typing.Literal["lxd-per-tox"]
-    )
+    mode: typing.Literal["local", "lxd", "lxd-per-tox"]
     lxd_name: str
     lxd_image_alias: str
     keep_lxd_instance: bool
     cache_folder: pathlib.Path
     ops_source: str
-    ops_source_branch: str | None
+    ops_source_branch: typing.Optional[str]
     remove_local_changes: bool
     git_pull: bool
     repo_re: str
@@ -171,7 +169,7 @@ def patch_ops(location: pathlib.Path):
 
 async def run_tox(
     location: pathlib.Path,
-    environment: str | None,
+    environment: typing.Optional[str],
     results: list,
 ):
     """Run the specified tox environment in the given path."""
