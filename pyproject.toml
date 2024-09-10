@@ -3,7 +3,7 @@ name = "charm-analysis"
 version = "1.0.0b1"
 description = "Tool to analyse charm code en masse"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.8"
 dependencies = [
     "click>=8.1.7",
     "httpx>=0.27.2",
@@ -11,3 +11,5 @@ dependencies = [
     "pyyaml>=6.0.2",
     "rich>=13.8.0",
 ]
+[project.optional-dependencies]
+tomli = ["tomli>=1.0; python_version<'3.11'"]
