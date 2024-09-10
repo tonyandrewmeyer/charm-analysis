@@ -35,10 +35,6 @@ dependencies = [
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "rich" },
-]
-
-[package.optional-dependencies]
-tomli = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
@@ -49,7 +45,7 @@ requires-dist = [
     { name = "packaging", specifier = ">=24.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=13.8.0" },
-    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'tomli'", specifier = ">=1.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
 ]
 
 [[package]]

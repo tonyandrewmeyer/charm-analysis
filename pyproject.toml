@@ -10,6 +10,5 @@ dependencies = [
     "packaging>=24.1",
     "pyyaml>=6.0.2",
     "rich>=13.8.0",
+    "tomli>=2.0 ; python_full_version < '3.11'",
 ]
-[project.optional-dependencies]
-tomli = ["tomli>=1.0; python_version<'3.11'"]
