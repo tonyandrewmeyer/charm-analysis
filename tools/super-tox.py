@@ -436,7 +436,7 @@ def fixme(f):
     return inner
 
 
-@click.option("--workers", default=lambda: os.cpu_count() or 3, type=click.IntRange(1))
+@click.option("--workers", default=1, type=click.IntRange(1))
 @click.option("--cache-folder", default=".cache")
 @click.option(
     "-c",
