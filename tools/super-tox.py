@@ -11,6 +11,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class Settings:
+    executable: str
     mode: typing.Literal["local", "lxd", "lxd-per-tox"]
     lxd_name: str
     lxd_image_alias: str
@@ -168,13 +170,14 @@ def patch_ops(location: pathlib.Path):
 
 
 async def run_tox(
+    executable: str,
     location: pathlib.Path,
     environment: typing.Optional[str],
     results: list,
 ):
     """Run the specified tox environment in the given path."""
     logger.info("Running %s in %s", environment, location)
-    args = ["tox"]
+    args = shlex.split(executable)
     if environment:
         args.extend(["-e", environment])
 
@@ -354,7 +357,7 @@ async def worker(name, queue, conf):
             if settings.mode == "local":
                 try:
                     with patch_ops(repo) if settings.ops_source else nullcontext():
-                        await run_tox(repo, environment, results)
+                        await run_tox(settings.executable, repo, environment, results)
                 except Exception as e:
                     logger.error("Failed running tox: %s", e, exc_info=True)
         queue.task_done()
@@ -468,6 +471,7 @@ def fixme(f):
 @click.option("-e", default=None, type=click.STRING)
 @click.option("--verbose/--no-verbose", default=False, help="additional output")
 @click.option("--sample", default=0, help="try to run only this many repositories")
+@click.option("--executable", default="tox")
 @click.command()
 def main(
     cache_folder: str,
