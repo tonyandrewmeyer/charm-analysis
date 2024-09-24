@@ -382,6 +382,13 @@ Example output:
 
 Run a tox environment across all of the charms at once.
 
+To specify the `tox` to use, pass the executable with the `--executable` flag,
+for example:
+
+* `super-tox.py --executable=~/.local/bin/tox`
+* `super-tox.py --executable='uvx tox'
+* `super-tox.py --executable='uvx --python=3.8 tox'
+
 A configuration file can be provided to skip repositories if required, in the
 form:
 
@@ -416,7 +423,7 @@ TODO:
 * [x] Automate running this in a lxd (or whatever) VM, to decrease the risk.
 * [ ] It would be good to also run the tests against scenario, pytest-operator (maybe others), even though those are not charms - figure out the best way to do that.
 * [ ] It would be very handy to be able to say "compare this version of ops and this version and list the tests that fail/pass only in one case"
-* [ ] Ideally, we could specify which version of Python to use in tox - this would require either adjusting the tox.ini file to specify the base Python or perhaps we just specify an exact path to tox, and rely on it being installed with the version we want?
+* [x] Ideally, we could specify which version of Python to use in tox - this would require either adjusting the tox.ini file to specify the base Python or perhaps we just specify an exact path to tox, and rely on it being installed with the version we want?
 * [ ] A lot of tests seem to fail with Python 3.12 - is this the charms, the tests, tox, super-tox, ... ?
 * [ ] Maybe patch out pytest running in parallel, or at least how many workers? e.g. mysql-router-k8s does --numprocesses=120 and that is very taxing while running other charm tests in parallel as well
 
