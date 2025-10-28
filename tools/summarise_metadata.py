@@ -68,15 +68,17 @@ def main(cache_folder: str):
         for resource in metadata.get("resources", ()):
             resources[resource] += 1
         for relation in metadata.get("requires", ()):
-            relations[f"{relation} : {metadata['requires'][relation]['interface']}"] += 1
+            relations[
+                f"{relation} : {metadata['requires'][relation]['interface']}"
+            ] += 1
         for storage in metadata.get("storage", ()):
             storages[metadata["storage"][storage]["type"]] += 1
         for device in metadata.get("devices", ()):
             devices[metadata["devices"][device]["type"]] += 1
 
-    assert (
-        not assumes_any and not assumes_all
-    ), "assumes_any and assumes_all have values, integrate them!"
+    assert not assumes_any and not assumes_all, (
+        "assumes_any and assumes_all have values, integrate them!"
+    )
     assert not devices, "Found some devices, add them to the report!"
     report(total, juju, assumes, containers, resources, relations, storages)
 
@@ -97,7 +99,9 @@ def report(total, juju, assumes, containers, resources, relations, storages):
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
-    table = count_and_percentage_table("Juju Versions", "Version", total, sorted(juju.items()))
+    table = count_and_percentage_table(
+        "Juju Versions", "Version", total, sorted(juju.items())
+    )
     console.print(table)
     console.print()
 
@@ -112,17 +116,23 @@ def report(total, juju, assumes, containers, resources, relations, storages):
 
     common_resources = [(env, count) for env, count in resources.items()]
     common_resources.sort(key=operator.itemgetter(1), reverse=True)
-    table = count_and_percentage_table("Common Resources", "Resource", total, common_resources[:5])
+    table = count_and_percentage_table(
+        "Common Resources", "Resource", total, common_resources[:5]
+    )
     console.print(table)
     console.print()
 
     common_relations = [(env, count) for env, count in relations.items()]
     common_relations.sort(key=operator.itemgetter(1), reverse=True)
-    table = count_and_percentage_table("Common Relations", "Relation", total, common_relations[:5])
+    table = count_and_percentage_table(
+        "Common Relations", "Relation", total, common_relations[:5]
+    )
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table("Storage Types", "Storage", total, sorted(storages.items()))
+    table = count_and_percentage_table(
+        "Storage Types", "Storage", total, sorted(storages.items())
+    )
     console.print(table)
     console.print()
 
