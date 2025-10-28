@@ -295,13 +295,11 @@ async def super_tox(conf, environment: str):
     print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
     if settings.verbose:
         print("Failed for these repos:")
-        pprint.pprint(
-            [
-                str(d["location"].relative_to(settings.cache_folder))
-                for d in results
-                if not d["passed"]
-            ]
-        )
+        pprint.pprint([
+            str(d["location"].relative_to(settings.cache_folder))
+            for d in results
+            if not d["passed"]
+        ])
 
 
 async def worker(name, queue, conf):
