@@ -246,26 +246,29 @@ async def get_charmhub_charms() -> list[CharmhubCharm]:
     return canonical_charms
 
 
-def load_csv_charms(csv_file: typing.TextIO) -> list[CharmInfo]:
+def load_csv_charms(csv_file_path: str) -> list[CharmInfo]:
     """Load charms from CSV file."""
     charms = []
-    reader = csv.DictReader(csv_file)
 
-    for row in reader:
-        if not row or not row.get("Repository"):
-            continue
+    with open(csv_file_path, "r") as csv_file:
+        reader = csv.DictReader(csv_file)
 
-        charm = CharmInfo(
-            team=row.get("Team", "").strip(),
-            name=row.get("Charm Name", "").strip(),
-            repository=row.get("Repository", "").strip(),
-            key_charm=row.get("Key Charm for this Team", "").strip().upper() == "TRUE",
-            branch=row.get("Branch (if not the default)", "").strip() or None,
-            notes=row.get("Notes", "").strip(),
-        )
+        for row in reader:
+            if not row or not row.get("Repository"):
+                continue
 
-        if charm.name and charm.repository:
-            charms.append(charm)
+            charm = CharmInfo(
+                team=row.get("Team", "").strip(),
+                name=row.get("Charm Name", "").strip(),
+                repository=row.get("Repository", "").strip(),
+                key_charm=row.get("Key Charm for this Team", "").strip().upper()
+                == "TRUE",
+                branch=row.get("Branch (if not the default)", "").strip() or None,
+                notes=row.get("Notes", "").strip(),
+            )
+
+            if charm.name and charm.repository:
+                charms.append(charm)
 
     return charms
 
@@ -305,6 +308,51 @@ def find_missing_charms(
             missing_charms.append(charmhub_charm)
 
     return missing_charms
+
+
+def add_missing_charms_to_csv(
+    csv_file_path: str,
+    existing_charms: list[CharmInfo],
+    missing_charms: list[CharmhubCharm],
+) -> int:
+    """Add missing charms to the CSV file.
+
+    Returns count of added charms.
+    """
+    if not missing_charms:
+        return 0
+
+    with open(csv_file_path, "r", newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        fieldnames = reader.fieldnames
+        existing_rows = list(reader)
+
+    new_rows = []
+    for charm in missing_charms:
+        new_row = {}
+        if "Team" in fieldnames:
+            new_row["Team"] = ""  # We can't easily figure this out automatically.
+        if "Charm Name" in fieldnames:
+            new_row["Charm Name"] = charm.name
+        if "Repository" in fieldnames:
+            new_row["Repository"] = charm.source_url or ""
+        if "Key Charm for this Team" in fieldnames:
+            new_row["Key Charm for this Team"] = "FALSE"
+        if "Branch" in fieldnames:
+            new_row["Branch"] = ""
+        elif "Branch (if not the default)" in fieldnames:
+            new_row["Branch (if not the default)"] = ""
+        if "Notes" in fieldnames:
+            new_row["Notes"] = "Added automatically from Charmhub"
+        new_rows.append(new_row)
+
+    with open(csv_file_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(existing_rows)
+        writer.writerows(new_rows)
+
+    return len(new_rows)
 
 
 def print_validation_results(
@@ -379,7 +427,7 @@ async def validate_all_charms(charms: list[CharmInfo]) -> list[ValidationResult]
 
 
 @click.command()
-@click.argument("charm-list", type=click.File("rt"))
+@click.argument("charm-list", type=click.Path(exists=True))
 @click.option(
     "--validate-only",
     is_flag=True,
@@ -391,15 +439,21 @@ async def validate_all_charms(charms: list[CharmInfo]) -> list[ValidationResult]
     help="Only check for missing charms, don't validate existing ones",
 )
 @click.option(
+    "--add-missing",
+    is_flag=True,
+    help="Add missing charms to the CSV file (requires write access)",
+)
+@click.option(
     "--output-format",
     type=click.Choice(["table", "json"]),
     default="table",
     help="Output format",
 )
 def main(
-    charm_list: typing.TextIO,
+    charm_list: str,
     validate_only: bool,
     missing_only: bool,
+    add_missing: bool,
     output_format: str,
 ):
     """
@@ -407,6 +461,8 @@ def main(
 
     This tool checks that all repositories in the CSV are accessible and not archived,
     and optionally finds charms published on Charmhub that are not in the CSV file.
+
+    With --add-missing, missing charms can be automatically added to the CSV file.
     """
     FORMAT = "%(message)s"
     logging.basicConfig(
@@ -436,6 +492,16 @@ def main(
         return results, missing_charms
 
     validation_results, missing_charms = asyncio.run(run_validation())
+
+    if add_missing and missing_charms:
+        try:
+            count = add_missing_charms_to_csv(charm_list, charms, missing_charms)
+            console.print(
+                f"\nAdded {count} missing charms to {charm_list}", style="green"
+            )
+        except Exception as e:
+            console.print(f"\nFailed to update CSV: {e}", style="red")
+            exit(1)
 
     if output_format == "json":
         output = {}
