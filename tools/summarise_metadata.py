@@ -76,9 +76,9 @@ def main(cache_folder: str):
         for device in metadata.get("devices", ()):
             devices[metadata["devices"][device]["type"]] += 1
 
-    assert (
-        not assumes_any and not assumes_all
-    ), "assumes_any and assumes_all have values, integrate them!"
+    assert not assumes_any and not assumes_all, (
+        "assumes_any and assumes_all have values, integrate them!"
+    )
     assert not devices, "Found some devices, add them to the report!"
     report(total, juju, assumes, containers, resources, relations, storages)
 
