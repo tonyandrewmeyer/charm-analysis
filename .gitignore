@@ -10,4 +10,4 @@ venv
 *.log
 super-tox.toml
 .*.swp
-.*csv
+*.csv
