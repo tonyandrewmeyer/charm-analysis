@@ -15,7 +15,7 @@ import rich.logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 def tox_ini(location: pathlib.Path, tox: collections.Counter, static: collections.Counter):
