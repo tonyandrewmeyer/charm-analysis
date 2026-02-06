@@ -7,7 +7,6 @@ import contextlib
 import dataclasses
 import itertools
 import logging
-import os
 import pathlib
 import pprint
 import re
@@ -33,10 +32,6 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class Settings:
     executable: str
-    mode: typing.Literal["local", "lxd", "lxd-per-tox"]
-    lxd_name: str
-    lxd_image_alias: str
-    keep_lxd_instance: bool
     cache_folder: pathlib.Path
     ops_source: str
     ops_source_branch: typing.Optional[str]
@@ -119,9 +114,9 @@ def patch_ops(location: pathlib.Path):
         # environments, if one isn't), but this seems sufficient for now.
         extras = {}
         for fn in itertools.chain(
-            requirements.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
-            requirements.glob("*-requirements.txt"),  # e.g. test-requirements.txt
-            requirements.glob("requirements*.in"),
+            location.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
+            location.glob("*-requirements.txt"),  # e.g. test-requirements.txt
+            location.glob("requirements*.in"),
         ):
             extras[fn] = _patch_requirements_file(fn)
         try:
@@ -181,23 +176,14 @@ async def run_tox(
     if environment:
         args.extend(["-e", environment])
 
-    if settings.mode == "local":
-        tox = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=location.resolve(),
-        )
-        stdout, stderr = await tox.communicate()
-        returncode = tox.returncode
-    else:
-        # TODO: Handle: config, cache folder, ops patching (higher than this!), fresh tox, lxd name, image alias, keeping instance
-        # Provide a partial to the method.
-        with lxd_instance(
-            f"{settings.lxd_name}-{location.name}",
-            delete_on_exit=not settings.keep_lxd_instance,
-        ) as lxd:
-            returncode, stdout, stderr = lxd.execute(args)
+    tox = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=location.resolve(),
+    )
+    stdout, stderr = await tox.communicate()
+    returncode = tox.returncode
     if returncode != 0:
         if stdout.strip():
             # This is potentially useful, but it's so verbose that it just
@@ -205,7 +191,6 @@ async def run_tox(
             # repo to get the output.
             # TODO: There must be a better solution here, like sending it to
             # somewhere it can be accessed in a handy format?
-            # logger.info("tox failed:%s in %s: %r", environment, location, stdout)
             pass
         if stderr.strip():
             logger.error("Errors from tox:%s in %s: %r", environment, location, stderr)
@@ -354,89 +339,12 @@ async def worker(name, queue, conf):
             if location in sum(ignore.values(), []):
                 logger.info("Skipping %r", location)
                 continue
-            if settings.mode == "local":
-                try:
-                    with patch_ops(repo) if settings.ops_source else nullcontext():
-                        await run_tox(settings.executable, repo, environment, results)
-                except Exception as e:
-                    logger.error("Failed running tox: %s", e, exc_info=True)
+            try:
+                with patch_ops(repo) if settings.ops_source else nullcontext():
+                    await run_tox(settings.executable, repo, environment, results)
+            except Exception as e:
+                logger.error("Failed running tox: %s", e, exc_info=True)
         queue.task_done()
-
-
-def get_lxd_instance(name: str, image_alias: str, create: bool = False):
-    """Get a local lxd instance by the specified name.
-
-    If create is True, then if there is no matching instance, then create one
-    using the provided image alias."""
-    import pylxd  # type: ignore
-
-    client = pylxd.Client()
-    try:
-        return client.instances.get(name)
-    except pylxd.exceptions.NotFound:
-        if not create:
-            raise
-    logger.info("Creating LXD instance %s (%s)", name, image_alias)
-    config = {"name": name, "source": {"type": "image", "alias": image_alias}}
-    return client.instances.create(config, wait=True)
-
-
-def lxd_exists(instance, filename: str) -> bool:
-    """Return true iff the filename exists on the instance."""
-    return instance.execute(["stat", filename]).exit_code == 0
-
-
-def sync_to_lxd(instance, source: pathlib.Path, destination: str):
-    """Recursively copy the source to the destination inside of the instance."""
-    # TODO: This assumes that there aren't edges cases like the path exists
-    # in the instance, but it's a file there and a directory locally.
-    for item in source.iterdir():
-        item_destination = os.path.join(destination, item.name)
-        if not lxd_exists(instance, str(item)):
-            # We can just copy it.
-            instance.files.recursive_put(str(item), item_destination)
-        elif item.is_file():
-            # If it's a file, we can just replace it.
-            instance.files.delete(item_destination)
-            instance.files.put(str(item), item_destination)
-        else:
-            sync_to_lxd(instance, item, item_destination)
-
-
-@contextlib.contextmanager
-def lxd_instance(name: str, *, delete_on_exit: bool = True):
-    instance = get_lxd_instance(name, settings.lxd_image_alias, create=True)
-    try:
-        if instance.status != "Running":
-            logger.info("Starting lxd instance %s", instance.name)
-            instance.start()
-        # TODO: Ideally, the two copies would really be syncs, to speed things
-        # up when the instance already exists, but without missing any changes
-        # since the initial copy.
-        logger.info("Copying charm-analysis to the instance")
-        me = pathlib.Path(__file__).parent.parent
-        sync_to_lxd(instance, me, "charm-analysis")
-        # Copy the cache to the instance.
-        if not settings.cache_folder.is_relative_to(me):
-            logger.info("Copying cache to the instance")
-            sync_to_lxd(instance, settings.cache_folder, "charm-analysis/.cache")
-        yield instance
-    finally:
-        if instance.status == "Running":
-            logger.info("Stopping lxd instance %s", instance.name)
-            instance.stop()
-        logger.info("Instance status: %s", instance.status)
-        if delete_on_exit:
-            logger.info("Deleting lxd instance %s", instance.name)
-            instance.delete()
-
-
-def fixme(f):
-    def inner(*args, **kwargs):
-        print(args, kwargs)
-        return f(*args, **kwargs)
-
-    return inner
 
 
 @click.option("--workers", default=1, type=click.IntRange(1))
@@ -456,14 +364,6 @@ def fixme(f):
         ["debug", "info", "warning", "error", "critical"], case_sensitive=False
     ),
 )
-@click.option(
-    "--mode",
-    default="local",
-    type=click.Choice(["local", "lxd", "lxd-per-tox"], case_sensitive=False),
-)
-@click.option("--lxd-name", default="super-tox")
-@click.option("--lxd-image-alias", default="ubuntu-22.04")
-@click.option("--keep-lxd-instance/--no-keep-lxd-instance", default=False)
 @click.option("--git-pull/--no-git-pull", default=False)
 @click.option("--remove-local-changes/--no-remove-local-changes", default=False)
 @click.option("--repo", default=".*")
@@ -497,39 +397,10 @@ def main(
     global settings
     settings = Settings(**kwargs, cache_folder=pathlib.Path(cache_folder), repo_re=repo)
 
-    if settings.mode in ("local", "lxd-per-tox"):
-        with config.open("rb") as raw:
-            conf = tomllib.load(raw)
+    with config.open("rb") as raw:
+        conf = tomllib.load(raw)
 
-        asyncio.run(super_tox(conf, e))
-    elif settings.mode == "lxd":
-        cmd = [
-            "/charm-analysis/super-tox.py",
-            f"--config={config}",
-            f"--cache-folder={settings.cache_folder}",  # TODO: This needs to adjust in some cases.
-            "-e",
-            e,
-            f"--workers={settings.workers}",
-            f"--ops-source={settings.ops_source}",
-            f"repo={settings.repo_re}",
-            f"--log-level={log_level}",
-        ]
-        if settings.ops_source_branch:
-            cmd.append(f"--ops-source-branch={settings.ops_source_branch}")
-        if settings.fresh_tox:
-            cmd.append("--fresh-tox")
-        if settings.remove_local_changes:
-            cmd.append("--remove-local-changes")
-        if settings.git_pull:
-            cmd.append("--git-pull")
-        with lxd_instance(
-            settings.lxd_name,
-            delete_on_exit=not settings.keep_lxd_instance,
-        ) as lxd:
-            exit_code, stdout, stderr = lxd.execute(cmd)
-        print(stdout, file=sys.stdout)
-        print(stderr, file=sys.stderr)
-        sys.exit(exit_code)
+    asyncio.run(super_tox(conf, e))
 
 
 if __name__ == "__main__":
