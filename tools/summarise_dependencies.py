@@ -12,7 +12,7 @@ import tomllib
 import click
 import packaging.requirements
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -157,13 +157,7 @@ def pyproject_toml(
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the dependencies of the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     dependencies_source = collections.Counter()

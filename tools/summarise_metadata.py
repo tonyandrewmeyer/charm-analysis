@@ -9,8 +9,8 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
 import yaml
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -90,13 +90,7 @@ def summarise_actions(repo: pathlib.Path):
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the metadata provided by the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     total_actions = 0

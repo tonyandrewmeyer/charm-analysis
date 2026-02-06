@@ -4,10 +4,21 @@ import itertools
 import logging
 import pathlib
 
+import rich.logging
 import rich.table
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+def configure_logging():
+    """Set up logging with RichHandler, used by all CLI tools."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
 
 
 def _iter_monorepo(base: pathlib.Path):

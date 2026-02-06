@@ -10,8 +10,8 @@ import pathlib
 import click
 import httpx
 import rich.console
-import rich.logging
 import yaml
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -59,13 +59,7 @@ def charm_details(name):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the charm artifacts."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     all_frameworks = collections.Counter()
