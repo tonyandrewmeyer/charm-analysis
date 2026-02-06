@@ -51,8 +51,12 @@ def _iter_non_monorepo(base: pathlib.Path):
 
 def _iter_bundles(base: pathlib.Path):
     """Automatically traverse the charms in a bundle."""
+    charms_dir = base / "charms"
+    if not charms_dir.exists():
+        logger.warning("Bundle %s has no charms/ directory", base)
+        return
     logger.info("Unbundling %s", base)
-    yield from (base / "charms").iterdir()
+    yield from charms_dir.iterdir()
 
 
 def iter_repositories(base: pathlib.Path):
