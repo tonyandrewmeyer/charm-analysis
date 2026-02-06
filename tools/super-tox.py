@@ -351,7 +351,8 @@ async def worker(name, queue, conf):
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
             location = str(repo.relative_to(settings.cache_folder))
-            if location in sum(ignore.values(), []):
+            all_ignored = {item for lst in ignore.values() for item in lst}
+            if location in all_ignored:
                 logger.info("Skipping %r", location)
                 continue
             if settings.mode == "local":
