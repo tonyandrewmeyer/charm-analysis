@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 """Summarise what charms do in __init__ (directly or indirectly)."""
 
@@ -10,6 +10,7 @@ import operator
 import pathlib
 
 import click
+import rich.console
 import rich.logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries

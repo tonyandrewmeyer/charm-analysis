@@ -9,6 +9,7 @@ import logging
 import pathlib
 
 import click
+import rich.console
 import rich.logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries

@@ -9,6 +9,7 @@ import pathlib
 
 import click
 import httpx
+import rich.console
 import rich.logging
 import yaml
 from helpers import count_and_percentage_table
