@@ -154,6 +154,7 @@ def walk_init(path):
     init = _find_func_by_name(charm, "__init__")
     if not init:
         logger.warning("Could not find __init__ in %s, %s", path, charm)
+        return None
     counter = OperationCounter(charm)
     counter.visit(init)
     return counter
