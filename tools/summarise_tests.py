@@ -109,6 +109,9 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
+    if not total:
+        console.print("No repositories found.")
+        return
     console.print(
         f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox."
     )

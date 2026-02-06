@@ -160,11 +160,9 @@ def report(total, events, defers, defers_by_team):
         "event.defer() Frequency", "Frequency", total, freq
     )
     table.add_section()
-    table.add_row(
-        "Total",
-        str(sum(defers.values())),
-        f"{(sum(defers.values()) / total * 100):.1f}",
-    )
+    defer_total = sum(defers.values())
+    pct = f"{(defer_total / total * 100):.1f}" if total else "N/A"
+    table.add_row("Total", str(defer_total), pct)
     console.print(table)
     console.print()
 
