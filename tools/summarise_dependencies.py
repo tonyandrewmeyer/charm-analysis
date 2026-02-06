@@ -75,12 +75,13 @@ def setup_py(
                 if kw.arg == "install_requires":
                     has_install_requires = True
                     for val in kw.value.elts:
-                        if "ops" in val:
-                            ops_versions[_ops_version(val, location)] += 1
+                        val_str = val.value if isinstance(val, ast.Constant) else ast.literal_eval(val)
+                        if "ops" in val_str:
+                            ops_versions[_ops_version(val_str, location)] += 1
                         else:
                             # There should be a cleaner way to do this.
-                            all_dependencies[val.split("=", 1)[0]] += 1
-                            all_dependencies_pinned[val] += 1
+                            all_dependencies[val_str.split("=", 1)[0]] += 1
+                            all_dependencies_pinned[val_str] += 1
                 elif kw.arg == "python_requires":
                     python_versions[kw.value.value] += 1
     return has_install_requires
