@@ -282,7 +282,7 @@ async def super_tox(conf, environment: str):
     for result in results:
         if result["passed"]:
             success_count += 1
-    pct = 100 * success_count // len(results)
+    pct = 100 * success_count // len(results) if results else 0
     print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
     if settings.verbose:
         print("Failed for these repos:")

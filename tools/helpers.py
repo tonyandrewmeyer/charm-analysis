@@ -99,5 +99,6 @@ def count_and_percentage_table(title, col0_title, total, counts):
     table.add_column("Count")
     table.add_column("Percentage")
     for label, count in counts:
-        table.add_row(str(label), str(count), f"{(count / total * 100):.1f}")
+        pct = f"{(count / total * 100):.1f}" if total else "N/A"
+        table.add_row(str(label), str(count), pct)
     return table

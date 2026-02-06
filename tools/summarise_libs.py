@@ -98,11 +98,9 @@ def report(total, repo_lib_count, lib_usage, lib_deps):
         sorted(repo_lib_count.items()),
     )
     table.add_section()
-    table.add_row(
-        "Total",
-        str(sum(repo_lib_count.values())),
-        f"{(sum(repo_lib_count.values()) / total * 100):.1f}",
-    )
+    lib_total = sum(repo_lib_count.values())
+    pct = f"{(lib_total / total * 100):.1f}" if total else "N/A"
+    table.add_row("Total", str(lib_total), pct)
     console.print(table)
     console.print()
 

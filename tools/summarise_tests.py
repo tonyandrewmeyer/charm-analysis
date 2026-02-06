@@ -105,7 +105,8 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
-    console.print(f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox.")
+    pct = f"{(uses_tox / total * 100):.1f}" if total else "N/A"
+    console.print(f"{uses_tox} out of {total} ({pct}%) use tox.")
     console.print()
 
     table = count_and_percentage_table(
