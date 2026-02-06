@@ -126,16 +126,16 @@ class OperationCounter(ast.NodeVisitor):
             else:
                 self._count_assign(target)
 
-    def visitAnnAssign(self, node: ast.AnnAssign):
+    def visit_AnnAssign(self, node: ast.AnnAssign):
         self._count_assign(node.target)
 
-    def visitRaise(self, node: ast.Raise):
+    def visit_Raise(self, node: ast.Raise):
         self.raises[node.exc] += 1
 
     def visit_Assert(self, node: ast.Assert):
         self.asserts[node.test] += 1
 
-    def visitReturn(self, node: ast.Return):
+    def visit_Return(self, node: ast.Return):
         self.explicit_return[node.value] += 1
 
 
