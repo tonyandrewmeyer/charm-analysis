@@ -70,9 +70,6 @@ def main(cache_folder):
     total = 0
     all_frameworks = collections.Counter()
     all_languages = collections.Counter()
-    # all_tracks = collections.Counter()
-    # all_channels = collections.Counter()
-    # all_revisions = collections.Counter()
     min_ages = collections.Counter()
     max_ages = collections.Counter()
     # TODO: figure out what to do with bundles - should I iterate through
