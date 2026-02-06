@@ -10,7 +10,7 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries
 
@@ -103,13 +103,7 @@ def relation_broken(module: pathlib.Path, handler_name: str):
 @click.command()
 def main(cache_folder, log_defer_over, team_info):
     """Output simple statistics about the charm code."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     # TODO: This won't work with bundles or monorepos.
     teams = {}

@@ -11,7 +11,7 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries
 
@@ -165,13 +165,7 @@ def walk_init(path):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the charm's __init__ code."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     calls = collections.Counter()

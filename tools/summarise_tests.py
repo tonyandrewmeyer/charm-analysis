@@ -11,7 +11,7 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -62,13 +62,7 @@ def find_test_imports(base):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the tests of the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     uses_tox = 0
