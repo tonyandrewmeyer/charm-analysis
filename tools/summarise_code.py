@@ -32,7 +32,11 @@ def _normalise_event(event: str):
 def observing(module: pathlib.Path):
     """Iterate through the events that a charm is observing."""
     with module.open() as charm:
-        tree = ast.parse(charm.read())
+        try:
+            tree = ast.parse(charm.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return
     # Assume that any calls to a method called "observe" are framework.observe calls.
     for node in ast.walk(tree):
         if (
@@ -61,7 +65,11 @@ def defer_count(module: pathlib.Path):
     """Count the number of times that defer() is called."""
     count = 0
     with module.open() as charm:
-        tree = ast.parse(charm.read())
+        try:
+            tree = ast.parse(charm.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return 0
     # Assume that all calls to a function called "defer" are event.defer()s.
     for node in ast.walk(tree):
         if (

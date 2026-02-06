@@ -78,11 +78,15 @@ def iter_entries(base: pathlib.Path):
         entry = "src/charm.py"
         if (repo / "charmcraft.yaml").exists():
             with (repo / "charmcraft.yaml").open() as charmcraft:
-                data = yaml.safe_load(charmcraft)
+                try:
+                    data = yaml.safe_load(charmcraft)
+                except yaml.YAMLError:
+                    logger.warning("Failed to parse charmcraft.yaml in %s", repo)
+                    continue
                 # For now, (wrongly) assume all the code is in the entrypoint module.
                 try:
                     entry = data["parts"]["charm"]["charm-entrypoint"]
-                except KeyError:
+                except (KeyError, TypeError):
                     pass
         if not (repo / entry).exists():
             logger.warning("Unable to find entrypoint for %s (guessed %s).", repo, entry)

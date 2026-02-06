@@ -40,7 +40,11 @@ def main(cache_folder: str):
             logger.warning("Cannot find metadata.yaml for %s", repo)
             continue
         with (repo / "metadata.yaml").open() as source:
-            metadata = yaml.safe_load(source)
+            try:
+                metadata = yaml.safe_load(source)
+            except yaml.YAMLError:
+                logger.warning("Failed to parse metadata.yaml in %s", repo)
+                continue
         for assumption in metadata.get("assumes", ()):
             if isinstance(assumption, dict):
                 for assumpt in assumption.get("any-of", ()):
