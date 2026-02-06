@@ -496,7 +496,7 @@ def main(
             e,
             f"--workers={settings.workers}",
             f"--ops-source={settings.ops_source}",
-            f"repo={settings.repo_re}",
+            f"--repo={settings.repo_re}",
             f"--log-level={log_level}",
         ]
         if settings.ops_source_branch:
