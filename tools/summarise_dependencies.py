@@ -98,17 +98,18 @@ def pyproject_toml(
 ):
     with location.open("rb") as pyproject:
         data = tomllib.load(pyproject)
-        if "dependencies" in data:
+        project = data.get("project", {})
+        if "dependencies" in project:
             yield "pyproject.toml"
-            for dep in data["dependencies"]:
+            for dep in project["dependencies"]:
                 if "ops" in dep:
                     ops_versions[_ops_version(dep, location)] += 1
                 else:
                     # There should be a cleaner way to do this.
                     all_dependencies[dep.split("=", 1)[0]] += 1
                     all_dependencies_pinned[dep] += 1
-        if "requires-python" in data:
-            python_versions[data["requires-python"]] += 1
+        if "requires-python" in project:
+            python_versions[project["requires-python"]] += 1
         for section in data.get("project", {}).get("optional-dependencies", {}):
             optional_dependency_sections[section] += 1
             if section == "dev":
