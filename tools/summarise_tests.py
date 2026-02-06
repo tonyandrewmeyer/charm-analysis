@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def tox_ini(location: pathlib.Path, tox: collections.Counter, static: collections.Counter):
-    tox_conf = configparser.ConfigParser()
+    tox_conf = configparser.ConfigParser(interpolation=None)
     tox_conf.read(location)
     for section in tox_conf.sections():
         if section.startswith("testenv:"):
