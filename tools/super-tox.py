@@ -280,17 +280,8 @@ async def super_tox(conf, environment: str):
     success_count = 0
 
     for result in results:
-        try:
-            if not result["passed"]:
-                continue
-        # FIXME these exceptions never happen...
-        except (TypeError, asyncio.CancelledError) as e:
-            logger.error("Task was cancelled: %s", e, exc_info=True)
-            continue
-        except Exception as e:
-            logger.error("Unable to process result: %s", e, exc_info=True)
-            continue
-        success_count += 1
+        if result["passed"]:
+            success_count += 1
     pct = 100 * success_count // len(results)
     print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
     if settings.verbose:
@@ -431,13 +422,6 @@ def lxd_instance(name: str, *, delete_on_exit: bool = True):
             logger.info("Deleting lxd instance %s", instance.name)
             instance.delete()
 
-
-def fixme(f):
-    def inner(*args, **kwargs):
-        print(args, kwargs)
-        return f(*args, **kwargs)
-
-    return inner
 
 
 @click.option("--workers", default=1, type=click.IntRange(1))
