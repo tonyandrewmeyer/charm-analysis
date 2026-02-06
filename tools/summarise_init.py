@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 def _get_root_tree(path):
     with path.open() as file:
-        return ast.parse(file.read(), path.name)
+        try:
+            return ast.parse(file.read(), path.name)
+        except SyntaxError:
+            logger.warning("Failed to parse %s", path)
+            return None
 
 
 def _find_charm_ast(tree):
@@ -148,6 +152,8 @@ def walk_init(path):
     function that's called.
     """
     tree = _get_root_tree(path)
+    if tree is None:
+        return None
     charm = _find_charm_ast(tree)
     if not charm:
         logger.warning("Could not find a CharmBase subclass in %s", path)

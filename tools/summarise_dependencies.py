@@ -64,7 +64,11 @@ def setup_py(
 ):
     has_install_requires = False
     with location.open() as setup:
-        tree = ast.parse(setup.read())
+        try:
+            tree = ast.parse(setup.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", location)
+            return False
         for node in ast.walk(tree):
             if (
                 not isinstance(node, ast.Call)

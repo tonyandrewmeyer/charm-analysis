@@ -39,7 +39,11 @@ def tox_ini(
 def find_imports(module):
     """Iterate through the names of the modules imported by the specified module."""
     with module.open() as raw:
-        tree = ast.parse(raw.read())
+        try:
+            tree = ast.parse(raw.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             yield node.module
