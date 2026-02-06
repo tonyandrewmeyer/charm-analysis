@@ -119,9 +119,9 @@ def patch_ops(location: pathlib.Path):
         # environments, if one isn't), but this seems sufficient for now.
         extras = {}
         for fn in itertools.chain(
-            requirements.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
-            requirements.glob("*-requirements.txt"),  # e.g. test-requirements.txt
-            requirements.glob("requirements*.in"),
+            location.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
+            location.glob("*-requirements.txt"),  # e.g. test-requirements.txt
+            location.glob("requirements*.in"),
         ):
             extras[fn] = _patch_requirements_file(fn)
         try:
