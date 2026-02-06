@@ -81,16 +81,6 @@ def main(cache_folder: str):
     report(total, juju, assumes, containers, resources, relations, storages)
 
 
-#    pprint.pprint(juju)
-#    pprint.pprint(assumes)
-#    pprint.pprint(assumes_all)
-#    pprint.pprint(assumes_any)
-#    pprint.pprint(containers)
-#    pprint.pprint(resources)
-#    pprint.pprint(relations)
-#    pprint.pprint(storages)
-#    pprint.pprint(devices)
-
 
 def report(total, juju, assumes, containers, resources, relations, storages):
     """Output a report of the results to the console."""
