@@ -119,9 +119,9 @@ def patch_ops(location: pathlib.Path):
         # environments, if one isn't), but this seems sufficient for now.
         extras = {}
         for fn in itertools.chain(
-            requirements.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
-            requirements.glob("*-requirements.txt"),  # e.g. test-requirements.txt
-            requirements.glob("requirements*.in"),
+            location.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
+            location.glob("*-requirements.txt"),  # e.g. test-requirements.txt
+            location.glob("requirements*.in"),
         ):
             extras[fn] = _patch_requirements_file(fn)
         try:
@@ -280,18 +280,9 @@ async def super_tox(conf, environment: str):
     success_count = 0
 
     for result in results:
-        try:
-            if not result["passed"]:
-                continue
-        # FIXME these exceptions never happen...
-        except (TypeError, asyncio.CancelledError) as e:
-            logger.error("Task was cancelled: %s", e, exc_info=True)
-            continue
-        except Exception as e:
-            logger.error("Unable to process result: %s", e, exc_info=True)
-            continue
-        success_count += 1
-    pct = 100 * success_count // len(results)
+        if result["passed"]:
+            success_count += 1
+    pct = 100 * success_count // len(results) if results else 0
     print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
     if settings.verbose:
         print("Failed for these repos:")
@@ -351,7 +342,8 @@ async def worker(name, queue, conf):
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
             location = str(repo.relative_to(settings.cache_folder))
-            if location in sum(ignore.values(), []):
+            all_ignored = {item for lst in ignore.values() for item in lst}
+            if location in all_ignored:
                 logger.info("Skipping %r", location)
                 continue
             if settings.mode == "local":
@@ -431,13 +423,6 @@ def lxd_instance(name: str, *, delete_on_exit: bool = True):
             instance.delete()
 
 
-def fixme(f):
-    def inner(*args, **kwargs):
-        print(args, kwargs)
-        return f(*args, **kwargs)
-
-    return inner
-
 
 @click.option("--workers", default=1, type=click.IntRange(1))
 @click.option("--cache-folder", default=".cache")
@@ -511,7 +496,7 @@ def main(
             e,
             f"--workers={settings.workers}",
             f"--ops-source={settings.ops_source}",
-            f"repo={settings.repo_re}",
+            f"--repo={settings.repo_re}",
             f"--log-level={log_level}",
         ]
         if settings.ops_source_branch:

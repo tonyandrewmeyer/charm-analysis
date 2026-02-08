@@ -12,7 +12,7 @@ import tomllib
 import click
 import packaging.requirements
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -64,7 +64,11 @@ def setup_py(
 ):
     has_install_requires = False
     with location.open() as setup:
-        tree = ast.parse(setup.read())
+        try:
+            tree = ast.parse(setup.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", location)
+            return False
         for node in ast.walk(tree):
             if (
                 not isinstance(node, ast.Call)
@@ -75,12 +79,13 @@ def setup_py(
                 if kw.arg == "install_requires":
                     has_install_requires = True
                     for val in kw.value.elts:
-                        if "ops" in val:
-                            ops_versions[_ops_version(val, location)] += 1
+                        val_str = val.value if isinstance(val, ast.Constant) else ast.literal_eval(val)
+                        if "ops" in val_str:
+                            ops_versions[_ops_version(val_str, location)] += 1
                         else:
                             # There should be a cleaner way to do this.
-                            all_dependencies[val.split("=", 1)[0]] += 1
-                            all_dependencies_pinned[val] += 1
+                            all_dependencies[val_str.split("=", 1)[0]] += 1
+                            all_dependencies_pinned[val_str] += 1
                 elif kw.arg == "python_requires":
                     python_versions[kw.value.value] += 1
     return has_install_requires
@@ -97,17 +102,18 @@ def pyproject_toml(
 ):
     with location.open("rb") as pyproject:
         data = tomllib.load(pyproject)
-        if "dependencies" in data:
+        project = data.get("project", {})
+        if "dependencies" in project:
             yield "pyproject.toml"
-            for dep in data["dependencies"]:
+            for dep in project["dependencies"]:
                 if "ops" in dep:
                     ops_versions[_ops_version(dep, location)] += 1
                 else:
                     # There should be a cleaner way to do this.
                     all_dependencies[dep.split("=", 1)[0]] += 1
                     all_dependencies_pinned[dep] += 1
-        if "requires-python" in data:
-            python_versions[data["requires-python"]] += 1
+        if "requires-python" in project:
+            python_versions[project["requires-python"]] += 1
         for section in data.get("project", {}).get("optional-dependencies", {}):
             optional_dependency_sections[section] += 1
             if section == "dev":
@@ -155,13 +161,7 @@ def pyproject_toml(
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the dependencies of the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     dependencies_source = collections.Counter()

@@ -4,10 +4,21 @@ import itertools
 import logging
 import pathlib
 
+import rich.logging
 import rich.table
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+def configure_logging():
+    """Set up logging with RichHandler, used by all CLI tools."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[rich.logging.RichHandler()],
+    )
 
 
 def _iter_monorepo(base: pathlib.Path):
@@ -40,8 +51,12 @@ def _iter_non_monorepo(base: pathlib.Path):
 
 def _iter_bundles(base: pathlib.Path):
     """Automatically traverse the charms in a bundle."""
+    charms_dir = base / "charms"
+    if not charms_dir.exists():
+        logger.warning("Bundle %s has no charms/ directory", base)
+        return
     logger.info("Unbundling %s", base)
-    yield from (base / "charms").iterdir()
+    yield from charms_dir.iterdir()
 
 
 def iter_repositories(base: pathlib.Path):
@@ -63,11 +78,15 @@ def iter_entries(base: pathlib.Path):
         entry = "src/charm.py"
         if (repo / "charmcraft.yaml").exists():
             with (repo / "charmcraft.yaml").open() as charmcraft:
-                data = yaml.safe_load(charmcraft)
+                try:
+                    data = yaml.safe_load(charmcraft)
+                except yaml.YAMLError:
+                    logger.warning("Failed to parse charmcraft.yaml in %s", repo)
+                    continue
                 # For now, (wrongly) assume all the code is in the entrypoint module.
                 try:
                     entry = data["parts"]["charm"]["charm-entrypoint"]
-                except KeyError:
+                except (KeyError, TypeError):
                     pass
         if not (repo / entry).exists():
             logger.warning("Unable to find entrypoint for %s (guessed %s).", repo, entry)
@@ -88,5 +107,6 @@ def count_and_percentage_table(title, col0_title, total, counts):
     table.add_column("Count")
     table.add_column("Percentage")
     for label, count in counts:
-        table.add_row(str(label), str(count), f"{(count / total * 100):.1f}")
+        pct = f"{(count / total * 100):.1f}" if total else "N/A"
+        table.add_row(str(label), str(count), pct)
     return table

@@ -9,7 +9,8 @@ import logging
 import pathlib
 
 import click
-import rich.logging
+import rich.console
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries
 
@@ -31,7 +32,11 @@ def _normalise_event(event: str):
 def observing(module: pathlib.Path):
     """Iterate through the events that a charm is observing."""
     with module.open() as charm:
-        tree = ast.parse(charm.read())
+        try:
+            tree = ast.parse(charm.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return
     # Assume that any calls to a method called "observe" are framework.observe calls.
     for node in ast.walk(tree):
         if (
@@ -60,7 +65,11 @@ def defer_count(module: pathlib.Path):
     """Count the number of times that defer() is called."""
     count = 0
     with module.open() as charm:
-        tree = ast.parse(charm.read())
+        try:
+            tree = ast.parse(charm.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return 0
     # Assume that all calls to a function called "defer" are event.defer()s.
     for node in ast.walk(tree):
         if (
@@ -102,13 +111,7 @@ def relation_broken(module: pathlib.Path, handler_name: str):
 @click.command()
 def main(cache_folder, log_defer_over, team_info):
     """Output simple statistics about the charm code."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     # TODO: This won't work with bundles or monorepos.
     teams = {}
@@ -161,11 +164,9 @@ def report(total, events, defers, defers_by_team):
     freq = [(i, defers[i]) for i in range(max(defers) + 1)]
     table = count_and_percentage_table("event.defer() Frequency", "Frequency", total, freq)
     table.add_section()
-    table.add_row(
-        "Total",
-        str(sum(defers.values())),
-        f"{(sum(defers.values()) / total * 100):.1f}",
-    )
+    defer_total = sum(defers.values())
+    pct = f"{(defer_total / total * 100):.1f}" if total else "N/A"
+    table.add_row("Total", str(defer_total), pct)
     console.print(table)
     console.print()
 

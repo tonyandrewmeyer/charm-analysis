@@ -9,10 +9,11 @@ import operator
 import pathlib
 
 import click
-import rich.logging
 import rich.console
 
-from helpers import iter_repositories, count_and_percentage_table
+from helpers import configure_logging
+from helpers import count_and_percentage_table
+from helpers import iter_repositories
 
 
 logger = logging.getLogger(__name__)
@@ -22,13 +23,7 @@ logger = logging.getLogger(__name__)
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the libs used/provided by the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     lib_count = collections.Counter()
@@ -103,11 +98,9 @@ def report(total, repo_lib_count, lib_usage, lib_deps):
         sorted(repo_lib_count.items()),
     )
     table.add_section()
-    table.add_row(
-        "Total",
-        str(sum(repo_lib_count.values())),
-        f"{(sum(repo_lib_count.values()) / total * 100):.1f}",
-    )
+    lib_total = sum(repo_lib_count.values())
+    pct = f"{(lib_total / total * 100):.1f}" if total else "N/A"
+    table.add_row("Total", str(lib_total), pct)
     console.print(table)
     console.print()
 
