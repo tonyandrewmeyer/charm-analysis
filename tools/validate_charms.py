@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Utility to validate charm repositories and discover missing charms."""
 
@@ -7,7 +7,6 @@ import csv
 import dataclasses
 import json
 import logging
-import typing
 import urllib.parse
 
 import click
@@ -48,7 +47,7 @@ class CharmhubCharm:
 
     name: str
     source_url: str | None
-    canonical_repo_name: str | None
+    repo_name: str | None
 
 
 async def check_repository_status(
@@ -115,7 +114,13 @@ async def validate_charm(
 
     status_code, is_archived = await check_repository_status(client, charm.repository)
 
-    if status_code == 404:
+    if status_code is None:
+        return ValidationResult(
+            charm=charm,
+            is_valid=False,
+            error_message="Request failed (no response)",
+        )
+    elif status_code == 404:
         return ValidationResult(
             charm=charm,
             is_valid=False,
@@ -130,7 +135,7 @@ async def validate_charm(
             is_archived=True,
             status_code=status_code,
         )
-    elif status_code and status_code >= 400:
+    elif status_code >= 400:
         return ValidationResult(
             charm=charm,
             is_valid=False,
@@ -188,8 +193,8 @@ async def get_charm_source_url(
     return None
 
 
-def extract_canonical_repo_name(url: str | None) -> str | None:
-    """Extract the repository name from a GitHub URL if it's a Canonical repository."""
+def extract_repo_name(url: str | None) -> str | None:
+    """Extract the repository name from a GitHub URL."""
     if not url:
         return None
 
@@ -202,12 +207,7 @@ def extract_canonical_repo_name(url: str | None) -> str | None:
         if len(path_parts) < 2:
             return None
 
-        owner, repo = path_parts[0], path_parts[1]
-
-        if owner != "canonical":
-            return None
-
-        return repo
+        return path_parts[1]
     except Exception:
         return None
 
@@ -224,26 +224,26 @@ async def get_charmhub_charms() -> list[CharmhubCharm]:
         async def fetch_charm_info(package):
             async with semaphore:
                 source_url = await get_charm_source_url(client, package["name"])
-                canonical_repo_name = extract_canonical_repo_name(source_url)
+                repo_name = extract_repo_name(source_url)
 
                 return CharmhubCharm(
                     name=package["name"],
                     source_url=source_url,
-                    canonical_repo_name=canonical_repo_name,
+                    repo_name=repo_name,
                 )
 
         tasks = [fetch_charm_info(package) for package in packages]
         charms = await asyncio.gather(*tasks)
 
-    canonical_charms = [charm for charm in charms if charm.canonical_repo_name]
+    charms_with_source = [charm for charm in charms if charm.source_url]
 
     logger.info(
-        "Found %d charms on charmhub, %d are Canonical charms with source repositories",
+        "Found %d charms on charmhub, %d have source repositories",
         len(charms),
-        len(canonical_charms),
+        len(charms_with_source),
     )
 
-    return canonical_charms
+    return charms_with_source
 
 
 def load_csv_charms(csv_file_path: str) -> list[CharmInfo]:
@@ -286,8 +286,8 @@ def extract_repo_name_from_url(url: str) -> str | None:
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) >= 2:
             return path_parts[1].removesuffix(".git")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to extract repository name from URL %s: %s", url, exc)
 
     return None
 
@@ -297,15 +297,24 @@ def find_missing_charms(
 ) -> list[CharmhubCharm]:
     """Find charms publicly listed on Charmhub that are not in the CSV."""
     csv_repo_names = set()
+    csv_source_urls = set()
     for charm in csv_charms:
         repo_name = extract_repo_name_from_url(charm.repository)
         if repo_name:
             csv_repo_names.add(repo_name)
+        if charm.repository:
+            csv_source_urls.add(charm.repository.rstrip("/"))
 
     missing_charms = []
     for charmhub_charm in charmhub_charms:
-        if charmhub_charm.canonical_repo_name not in csv_repo_names:
-            missing_charms.append(charmhub_charm)
+        if charmhub_charm.repo_name and charmhub_charm.repo_name in csv_repo_names:
+            continue
+        if (
+            charmhub_charm.source_url
+            and charmhub_charm.source_url.rstrip("/") in csv_source_urls
+        ):
+            continue
+        missing_charms.append(charmhub_charm)
 
     return missing_charms
 
@@ -402,7 +411,7 @@ def print_missing_charms(
     for charm in missing_charms:
         table.add_row(
             charm.name,
-            charm.canonical_repo_name or "Unknown",
+            charm.repo_name or "Unknown",
             charm.source_url or "Not found",
         )
 
@@ -524,7 +533,7 @@ def main(
             output["missing_charms"] = [
                 {
                     "charm_name": c.name,
-                    "repository_name": c.canonical_repo_name,
+                    "repository_name": c.repo_name,
                     "source_url": c.source_url,
                 }
                 for c in missing_charms

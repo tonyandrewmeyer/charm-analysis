@@ -33,13 +33,6 @@ import typing
 
 import click
 import rich.logging
-import rich.console
-
-from .validate_charms import (
-    validate_all_charms,
-    load_csv_charms,
-    print_validation_results,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -107,17 +100,9 @@ async def process_input(input: csv.DictReader, cache_folder: pathlib.Path):
 
 
 @click.option("--cache-folder", default=".cache")
-@click.option(
-    "--validate", is_flag=True, help="Validate repositories before cloning/pulling"
-)
-@click.option(
-    "--skip-missing", is_flag=True, help="Skip repositories that return 404 errors"
-)
 @click.argument("charm-list", type=click.File("rt"))
 @click.command()
-def main(
-    cache_folder: str, validate: bool, skip_missing: bool, charm_list: typing.TextIO
-):
+def main(cache_folder: str, charm_list: typing.TextIO):
     """Ensure updated repositories for all the charms from the provided list.
 
     If a repository does not exist, clone it, otherwise do a pull. Assumes that
@@ -136,66 +121,8 @@ def main(
     )
 
     os.makedirs(cache_folder, exist_ok=True)
-
-    console = rich.console.Console()
-
-    # Reset file pointer for reading
-    charm_list.seek(0)
-
-    if validate:
-        console.print("Validating charm repositories...")
-        charms = load_csv_charms(charm_list)
-
-        async def run_validation():
-            return await validate_all_charms(charms)
-
-        validation_results = asyncio.run(run_validation())
-        print_validation_results(validation_results, console)
-
-        if skip_missing:
-            invalid_repos = {
-                r.charm.repository for r in validation_results if not r.is_valid
-            }
-            console.print(f"Skipping {len(invalid_repos)} invalid repositories")
-
-        charm_list.seek(0)
-
     input = csv.DictReader(charm_list)
-
-    if validate and skip_missing:
-        filtered_rows = []
-        invalid_repos = {
-            r.charm.repository for r in validation_results if not r.is_valid
-        }
-
-        for row in input:
-            if row and row.get("Repository") and row["Repository"] not in invalid_repos:
-                filtered_rows.append(row)
-
-        async def process_filtered_input():
-            async with asyncio.TaskGroup() as tg:
-                for row in filtered_rows:
-                    name = row["Charm Name"]
-                    repository = row["Repository"]
-                    branch = row.get("Branch (if not the default)")
-                    repository = repository.replace(
-                        "https://github.com/", "git@github.com:"
-                    )
-                    base_name = repository.rstrip("/").rsplit("/", 1)[1]
-                    if branch:
-                        repo_folder = (
-                            pathlib.Path(cache_folder) / f"{base_name}-{branch}"
-                        )
-                    else:
-                        repo_folder = pathlib.Path(cache_folder) / base_name
-                    if repo_folder.exists():
-                        tg.create_task(pull(repo_folder, name))
-                    else:
-                        tg.create_task(clone(repo_folder, name, repository, branch))
-
-        asyncio.run(process_filtered_input())
-    else:
-        asyncio.run(process_input(input, pathlib.Path(cache_folder)))
+    asyncio.run(process_input(input, pathlib.Path(cache_folder)))
 
 
 if __name__ == "__main__":
