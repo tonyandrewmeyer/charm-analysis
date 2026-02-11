@@ -18,7 +18,9 @@ from helpers import iter_repositories
 logger = logging.getLogger("__name__")
 
 
-def tox_ini(location: pathlib.Path, tox: collections.Counter, static: collections.Counter):
+def tox_ini(
+    location: pathlib.Path, tox: collections.Counter, static: collections.Counter
+):
     tox_conf = configparser.ConfigParser()
     tox_conf.read(location)
     for section in tox_conf.sections():
@@ -113,7 +115,9 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
-    console.print(f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox.")
+    console.print(
+        f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox."
+    )
     console.print()
 
     table = count_and_percentage_table(
@@ -152,7 +156,9 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
     # * 20 have a "scenario" tox environment, but only 15 are importing scenario:
     #   one of those numbers is surely wrong.
 
-    static_environments = [(env, count) for env, count in tox_static_environments.items()]
+    static_environments = [
+        (env, count) for env, count in tox_static_environments.items()
+    ]
     static_environments.sort(key=operator.itemgetter(1), reverse=True)
     table = count_and_percentage_table(
         "Static Checking Tox Environments", "Environment", uses_tox, static_environments

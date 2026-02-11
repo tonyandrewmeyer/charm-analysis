@@ -132,7 +132,9 @@ def main(cache_folder, log_defer_over, team_info):
         events.update(repo_events.keys())
         if "relation_broken" in repo_events:
             relation_broken(entry, repo_events["relation_broken"])
-        total_defers = sum(defer_count(module) for module in entry.parent.glob("**/*.py"))
+        total_defers = sum(
+            defer_count(module) for module in entry.parent.glob("**/*.py")
+        )
         # TODO: This assumes the entry is in a "src" (or otherwise named) folder.
         defers_by_team[teams.get(entry.parent.parent.name, "Unknown")] += total_defers
 
@@ -159,7 +161,9 @@ def report(total, events, defers, defers_by_team):
 
     # Fill in the zeros.
     freq = [(i, defers[i]) for i in range(max(defers) + 1)]
-    table = count_and_percentage_table("event.defer() Frequency", "Frequency", total, freq)
+    table = count_and_percentage_table(
+        "event.defer() Frequency", "Frequency", total, freq
+    )
     table.add_section()
     table.add_row(
         "Total",
