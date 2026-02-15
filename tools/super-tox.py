@@ -15,13 +15,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import typing
 from contextlib import nullcontext
 
 try:
     import tomllib  # type: ignore
 except ImportError:
     import tomli as tomllib  # type: ignore
-import typing
 
 import click
 import packaging.requirements
@@ -476,7 +476,7 @@ def fixme(f):
 def main(
     cache_folder: str,
     e: str,
-    log_level: str,
+    log_level: typing.Literal["debug", "info", "warning", "error", "critical"],
     repo: str,
     config: pathlib.Path,
     **kwargs,
