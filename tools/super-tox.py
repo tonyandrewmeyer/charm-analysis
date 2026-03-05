@@ -2,6 +2,7 @@
 
 """Utility to bulk run tox commands across charm repositories."""
 
+import ast
 import asyncio
 import contextlib
 import dataclasses
@@ -43,6 +44,7 @@ class Settings:
     workers: int
     verbose: bool
     sample: int
+    filter_framework: typing.Optional[str]
 
 
 settings: Settings = None  # type: ignore
@@ -225,6 +227,154 @@ def patch_ops(location: pathlib.Path):
         )
 
 
+# Imports that indicate use of a given testing framework.
+# For simple cases, any import of the module name is sufficient.
+FRAMEWORK_IMPORTS = {
+    "scenario": {"scenario"},
+    "jubilant": {"jubilant"},
+}
+
+# Names imported from ops.testing that indicate Scenario usage (as opposed to
+# the old Harness framework, which is also in ops.testing).
+SCENARIO_OPS_TESTING_NAMES = {
+    "Context", "State", "Mount", "Relation",
+    "CloudSpec", "Secret", "PeerRelation", "SubordinateRelation",
+}
+
+# Package names in requirements files that indicate a framework dependency.
+# ops[testing] is handled separately by checking extras on the "ops" package.
+FRAMEWORK_DEPS = {
+    "scenario": {"ops-scenario"},
+    "jubilant": {"jubilant"},
+}
+
+
+def _iter_test_python_files(base: pathlib.Path):
+    """Iterate through all .py files in a tests directory."""
+    if not base.exists():
+        return
+    for node in base.iterdir():
+        if node.name.startswith("."):
+            continue
+        if node.is_dir():
+            yield from _iter_test_python_files(node)
+        elif node.name.endswith(".py"):
+            yield node
+
+
+def _has_framework_import(location: pathlib.Path, framework: str) -> bool:
+    """Check if test files in the charm import the specified framework.
+
+    For most frameworks, a simple module-name match is enough. For Scenario,
+    we also need to distinguish ``from ops.testing import Context`` (Scenario)
+    from ``from ops.testing import Harness`` (old Harness framework).
+    """
+    simple_modules = FRAMEWORK_IMPORTS.get(framework, set())
+    for py_file in _iter_test_python_files(location / "tests"):
+        try:
+            with py_file.open() as raw:
+                tree = ast.parse(raw.read())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in simple_modules:
+                        return True
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module in simple_modules:
+                    return True
+                # Check for Scenario-specific names imported from ops.testing.
+                if framework == "scenario" and node.module == "ops.testing":
+                    for alias in node.names:
+                        if alias.name in SCENARIO_OPS_TESTING_NAMES:
+                            return True
+    return False
+
+
+def _req_matches_framework(
+    req: packaging.requirements.Requirement, framework: str, dep_names: set
+) -> bool:
+    """Check if a parsed requirement matches the specified framework."""
+    if req.name in dep_names:
+        return True
+    # ops[testing] provides Scenario.
+    if framework == "scenario" and req.name == "ops" and "testing" in req.extras:
+        return True
+    return False
+
+
+def _has_framework_dep_in_requirements(req_path: pathlib.Path, framework: str) -> bool:
+    """Check if a requirements file contains the specified framework as a dependency."""
+    dep_names = FRAMEWORK_DEPS.get(framework, set())
+    if not req_path.exists():
+        return False
+    with req_path.open() as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line or line.startswith("-") or line.startswith("git+"):
+                continue
+            try:
+                req = packaging.requirements.Requirement(line)
+            except packaging.requirements.InvalidRequirement:
+                continue
+            if _req_matches_framework(req, framework, dep_names):
+                return True
+    return False
+
+
+def _has_framework_dep_in_pyproject(pyproject_path: pathlib.Path, framework: str) -> bool:
+    """Check if pyproject.toml contains the specified framework as a dependency."""
+    dep_names = FRAMEWORK_DEPS.get(framework, set())
+    if not pyproject_path.exists():
+        return False
+    with pyproject_path.open("rb") as f:
+        try:
+            data = tomllib.load(f)
+        except Exception:
+            return False
+    # Check all dependency lists: top-level, project, project.optional-dependencies,
+    # and poetry groups.
+    all_dep_strings = list(data.get("dependencies", []))
+    all_dep_strings.extend(data.get("project", {}).get("dependencies", []))
+    for section_deps in data.get("project", {}).get("optional-dependencies", {}).values():
+        all_dep_strings.extend(section_deps)
+    # Poetry dependencies.
+    poetry = data.get("tool", {}).get("poetry", {})
+    all_dep_strings.extend(poetry.get("dependencies", {}).keys())
+    for group in poetry.get("group", {}).values():
+        all_dep_strings.extend(group.get("dependencies", {}).keys())
+
+    for dep_str in all_dep_strings:
+        try:
+            req = packaging.requirements.Requirement(dep_str)
+        except packaging.requirements.InvalidRequirement:
+            continue
+        if _req_matches_framework(req, framework, dep_names):
+            return True
+    return False
+
+
+def uses_framework(location: pathlib.Path, framework: str) -> bool:
+    """Check if a charm uses the specified testing framework.
+
+    Checks dependencies in requirements files first (cheaper), then falls back
+    to AST-based import scanning of test files.
+    """
+    # Check all requirements*.txt and *-requirements.txt files.
+    req_files = set(itertools.chain(
+        location.glob("requirements*.txt"),
+        location.glob("*-requirements.txt"),
+    ))
+    for req_file in req_files:
+        if _has_framework_dep_in_requirements(req_file, framework):
+            return True
+    if _has_framework_dep_in_pyproject(location / "pyproject.toml", framework):
+        return True
+    # Fall back to more expensive AST-based import scanning.
+    return _has_framework_import(location, framework)
+
+
 async def run_tox(
     executable: str,
     location: pathlib.Path,
@@ -257,14 +407,19 @@ async def run_tox(
             logger.error("Errors from tox:%s in %s: %r", environment, location, stderr)
     # TODO: Should do more than this - does everything have a coverage report?
     # Can we get totals reliably?
-    passed = returncode == 0
-    if passed:
+    if returncode == 0:
         logger.info("%s: passed", location)
+        results.append({"passed": True, "location": location})
     elif returncode == 254:
-        logger.info("No %s environment found in %s", environment, location)
+        logger.info("Skipping %s - no '%s' tox environment", location, environment)
+        results.append({
+            "skipped": "no_environment",
+            "location": location,
+            "reason": f"no '{environment}' tox environment",
+        })
     else:
         logger.warning("%s did not pass", location)
-    results.append({"passed": passed, "location": location})
+        results.append({"passed": False, "location": location})
 
 
 async def super_tox(conf, environment: str):
@@ -325,34 +480,53 @@ async def super_tox(conf, environment: str):
 
     await asyncio.gather(*tasks, return_exceptions=True)
     results.sort(key=lambda d: str(d.get("location", "")))
-    success_count = 0
 
-    for result in results:
-        if not isinstance(result, dict):
-            logger.error("Unexpected result type: %s", result)
-            continue
-        if not result.get("passed"):
-            continue
-        success_count += 1
-    if not results:
-        print("No repositories were tested.")
-        return
-    pct = 100 * success_count // len(results)
-    print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
+    passed = [r for r in results if isinstance(r, dict) and r.get("passed") is True]
+    failed = [r for r in results if isinstance(r, dict) and r.get("passed") is False]
+    skipped = [r for r in results if isinstance(r, dict) and "skipped" in r]
+    ran = [r for r in results if isinstance(r, dict) and "passed" in r]
+
+    if ran:
+        pct = 100 * len(passed) // len(ran)
+        print(f"{len(passed)} out of {len(ran)} ({pct}%) runs passed.")
+    else:
+        print("No tests were run.")
+
+    if skipped:
+        skip_reasons = {}
+        for r in skipped:
+            skip_type = r["skipped"]
+            skip_reasons.setdefault(skip_type, []).append(r)
+        parts = []
+        if "no_framework" in skip_reasons:
+            fw = settings.filter_framework
+            parts.append(f"{len(skip_reasons['no_framework'])} had no {fw} tests")
+        if "no_environment" in skip_reasons:
+            parts.append(
+                f"{len(skip_reasons['no_environment'])} had no '{environment}' tox environment"
+            )
+        if "ignored" in skip_reasons:
+            parts.append(f"{len(skip_reasons['ignored'])} in ignore list")
+        print(f"Skipped {len(skipped)} charms ({', '.join(parts)}).")
+
     if settings.verbose:
-        print("Failed for these repos:")
-        pprint.pprint(
-            [
+        if failed:
+            print("Failed:")
+            pprint.pprint([
                 str(d["location"].relative_to(settings.cache_folder))
-                for d in results
-                if not d["passed"]
-            ]
-        )
+                for d in failed
+            ])
+        if skipped:
+            print("Skipped:")
+            for r in skipped:
+                loc = str(r["location"].relative_to(settings.cache_folder))
+                print(f"  {loc}: {r.get('reason', r['skipped'])}")
 
 
 async def worker(name, queue, conf):
     logger.info("Starting worker: %s", name)
     ignore = conf.get("ignore", {})
+    all_ignored = set(itertools.chain.from_iterable(ignore.values()))
     while True:
         try:
             repo, environment, results = await queue.get()
@@ -360,25 +534,15 @@ async def worker(name, queue, conf):
             # We don't need to do anything any more.
             break
         location = str(repo.relative_to(settings.cache_folder))
-        if location in ignore.get("expensive", ()):
-            logger.info("Skipping %r - too expensive", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("manual", ()):
-            logger.info("Skipping %r - requires manual intervention", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("requirements", ()):
-            logger.info("Skipping %r - cannot install dependencies", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("not_ops", ()):
-            logger.info("Skipping %r - does not use ops", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("misc", ()):
-            logger.info("Skipping %r - in misc ignore list", location)
-            queue.task_done()
+        ignored = False
+        for category, reason in IGNORE_REASONS.items():
+            if location in ignore.get(category, ()):
+                logger.info("Skipping %r - %s", location, reason)
+                results.append({"skipped": "ignored", "location": repo, "reason": reason})
+                queue.task_done()
+                ignored = True
+                break
+        if ignored:
             continue
 
         if (
@@ -399,10 +563,23 @@ async def worker(name, queue, conf):
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
             location = str(repo.relative_to(settings.cache_folder))
-            all_ignored = {item for lst in ignore.values() for item in lst}
             if location in all_ignored:
-                logger.info("Skipping %r", location)
+                logger.info("Skipping %r - in ignore list", location)
+                results.append({"skipped": "ignored", "location": repo, "reason": "in ignore list"})
                 continue
+            if settings.filter_framework:
+                if not uses_framework(repo, settings.filter_framework):
+                    logger.info(
+                        "Skipping %s - does not use %s",
+                        location,
+                        settings.filter_framework,
+                    )
+                    results.append({
+                        "skipped": "no_framework",
+                        "location": repo,
+                        "reason": f"does not use {settings.filter_framework}",
+                    })
+                    continue
             try:
                 with patch_ops(repo) if settings.ops_source else nullcontext():
                     await run_tox(settings.executable, repo, environment, results)
@@ -433,6 +610,13 @@ async def worker(name, queue, conf):
 @click.option("--repo", default=".*")
 @click.option("--fresh-tox/--no-fresh-tox", default=False)
 @click.option("-e", default=None, type=click.STRING)
+@click.option(
+    "--filter",
+    "filter_framework",
+    default=None,
+    type=click.Choice(["scenario", "jubilant"], case_sensitive=False),
+    help="only run for charms that use this testing framework",
+)
 @click.option("--verbose/--no-verbose", default=False, help="additional output")
 @click.option("--sample", default=0, help="try to run only this many repositories")
 @click.option("--executable", default="tox")
