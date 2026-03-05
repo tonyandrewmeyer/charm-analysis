@@ -81,7 +81,6 @@ def iter_python_src(base: pathlib.Path):
         yield from repo.glob("src/**/*.py")
 
 
-
 def count_and_percentage_table(title, col0_title, total, counts):
     """Return a rich.table.Table that has a count and percentage columns."""
     table = rich.table.Table(title=title)
