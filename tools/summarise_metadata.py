@@ -17,6 +17,75 @@ from helpers import iter_repositories
 logger = logging.getLogger(__name__)
 
 
+def summarise_actions(repo: pathlib.Path):
+    yaml_file = None
+    key = None
+    if (repo / "actions.yaml").exists():
+        yaml_file = repo / "actions.yaml"
+        key = None
+    elif (repo / "charmcraft.yaml").exists():
+        yaml_file = repo / "charmcraft.yaml"
+        key = "actions"
+    if not yaml_file:
+        logger.info("Cannot find actions metadata for %s", repo)
+        return
+    with yaml_file.open() as source:
+        metadata = yaml.safe_load(source)
+        if key:
+            try:
+                metadata = metadata[key]
+            except KeyError:
+                logger.info("Cannot find actions metadata for %s", repo)
+                return
+    total_actions = 0
+    params_count = collections.Counter()
+    actions_by_type = collections.Counter()
+    actions_required_percentage = collections.Counter()
+    has_additional_properties = 0
+    has_execution_group = 0
+    has_parallel = 0
+    defaults = set()
+    for name, action in metadata.items():
+        total_actions += 1
+        if "additionalProperties" in action:
+            has_additional_properties += 1
+        if "parallel" in action:
+            has_parallel += 1
+        if "execution-group" in action:
+            has_execution_group += 1
+        params_count[len(action.get("params", ()))] += 1
+        for param_name, param in action.get("params", {}).items():
+            actions_by_type[param.get("type", "unknown")] += 1
+            if "default" in param:
+                defaults.add(str(param["default"]))
+            if "properties" in param:
+                logger.warning(
+                    "Properties: %s: %s: %s: %r",
+                    repo,
+                    name,
+                    param_name,
+                    param["properties"],
+                )
+        if "required" in action:
+            required_count = len(action["required"])
+            param_count = len(action.get("params", ()))
+            if param_count == 0:
+                actions_required_percentage["n/a"] += 1
+            else:
+                actions_required_percentage[required_count / param_count] += 1
+
+    return (
+        total_actions,
+        params_count,
+        actions_by_type,
+        actions_required_percentage,
+        has_additional_properties,
+        has_execution_group,
+        has_parallel,
+        defaults,
+    )
+
+
 @click.option("--cache-folder", default=".cache")
 @click.command()
 def main(cache_folder: str):
@@ -30,6 +99,7 @@ def main(cache_folder: str):
     )
 
     total = 0
+    total_actions = 0
     juju = collections.Counter()
     assumes = collections.Counter()
     assumes_all = collections.Counter()
@@ -40,12 +110,25 @@ def main(cache_folder: str):
     storages = collections.Counter()
     devices = collections.Counter()
 
+    has_additional_properties = 0
+    has_parallel = 0
+    has_execution_group = 0
+    action_defaults = set()
+    action_params_count = collections.Counter()
+    actions_by_type = collections.Counter()
+    actions_required_percentage = collections.Counter()
+
     for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
-        if not (repo / "metadata.yaml").exists():
-            logger.warning("Cannot find metadata.yaml for %s", repo)
+        yaml_file = None
+        if (repo / "metadata.yaml").exists():
+            yaml_file = repo / "metadata.yaml"
+        elif (repo / "charmcraft.yaml").exists():
+            yaml_file = repo / "charmcraft.yaml"
+        if not yaml_file:
+            logger.warning("Cannot find metadata for %s", repo)
             continue
-        with (repo / "metadata.yaml").open() as source:
+        with yaml_file.open() as source:
             metadata = yaml.safe_load(source)
         for assumption in metadata.get("assumes", ()):
             if isinstance(assumption, dict):
@@ -75,6 +158,38 @@ def main(cache_folder: str):
             storages[metadata["storage"][storage]["type"]] += 1
         for device in metadata.get("devices", ()):
             devices[metadata["devices"][device]["type"]] += 1
+        action_data = summarise_actions(repo)
+        if action_data:
+            (
+                charm_total_actions,
+                charm_params_count,
+                charm_actions_by_type,
+                charm_actions_required_percentage,
+                charm_has_additional_properties,
+                charm_has_execution_group,
+                charm_has_parallel,
+                charm_defaults,
+            ) = action_data
+            total_actions += charm_total_actions
+            has_parallel += charm_has_parallel
+            has_execution_group += charm_has_execution_group
+            has_additional_properties += charm_has_additional_properties
+            action_defaults = action_defaults.union(charm_defaults)
+            action_params_count.update(charm_params_count)
+            actions_by_type.update(charm_actions_by_type)
+            actions_required_percentage.update(charm_actions_required_percentage)
+
+    logger.info(
+        "Found %s actions in total with %s params", total_actions, action_params_count
+    )
+    logger.info(
+        "%s charms have additional properties set to True", has_additional_properties
+    )
+    logger.info("%s charms have parallel set", has_parallel)
+    logger.info("%s charms have execution-group set", has_execution_group)
+    logger.info("Action defaults: %s", action_defaults)
+    logger.info("Actions by type: %s", actions_by_type)
+    logger.info("Actions required percentage: %s", actions_required_percentage)
 
     assert not assumes_any and not assumes_all, (
         "assumes_any and assumes_all have values, integrate them!"
