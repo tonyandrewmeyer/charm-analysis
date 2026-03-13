@@ -40,7 +40,7 @@ def main(cache_folder):
             k8s_names.add(charm_name.rsplit("-", 1)[0])
         else:
             names.add(charm_name)
-    for name in k8s_names:
+    for name in sorted(k8s_names):
         if name in names:
             print(name)
 
