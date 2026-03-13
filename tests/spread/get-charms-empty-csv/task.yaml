@@ -1,0 +1,24 @@
+summary: Handle an empty CSV file (header only) gracefully
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  # CSV with header but no data rows.
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  EOF
+
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  # Cache should be empty (no repos cloned).
+  COUNT=$(find "$CACHE" -mindepth 1 -maxdepth 1 -type d | wc -l)
+  test "$COUNT" -eq 0
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

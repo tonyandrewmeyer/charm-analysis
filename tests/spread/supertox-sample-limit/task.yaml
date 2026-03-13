@@ -1,0 +1,38 @@
+summary: Verify --sample limits the number of repos processed
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  # Clone two charms.
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,,
+  Test,Element Web,https://github.com/canonical/element-web-operator,TRUE,,
+  EOF
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  cat > "$TMPDIR/super-tox.toml" <<'EOF'
+  [ignore]
+  EOF
+
+  # Run with --sample 1 to limit to first repo found.
+  output=$(super-tox \
+    --cache-folder "$CACHE" \
+    -c "$TMPDIR/super-tox.toml" \
+    -e unit \
+    --sample 1 \
+    --ops-source "" \
+    2>&1) || true
+  echo "$output"
+
+  # Summary should report results for exactly 1 repo.
+  echo "$output" | MATCH "out of 1"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

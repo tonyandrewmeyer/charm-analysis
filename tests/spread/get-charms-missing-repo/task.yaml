@@ -1,0 +1,27 @@
+summary: Handle an invalid repository URL without crashing
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Bad Charm,https://github.com/canonical/this-repo-does-not-exist-12345,TRUE,,
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,,
+  EOF
+
+  # Should not crash — the bad repo logs an error, the good one succeeds.
+  output=$(get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv" 2>&1) || true
+
+  echo "$output" | MATCH "Could not clone"
+
+  # The valid repo should still have been cloned.
+  test -d "$CACHE/self-signed-certificates-operator"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

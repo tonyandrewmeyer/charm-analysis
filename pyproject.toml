@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "charm-analysis"
 version = "1.0.0b1"
@@ -11,3 +15,11 @@ dependencies = [
     "pyyaml>=6.0.2",
     "rich>=13.8.0",
 ]
+
+[project.scripts]
+get-charms = "tools.get_charms:main"
+super-tox = "tools.super_tox:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tools"]
+

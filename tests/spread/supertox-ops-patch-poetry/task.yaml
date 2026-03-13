@@ -1,0 +1,88 @@
+summary: Verify ops dependency patching in Poetry-based projects
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+  CHARM_DIR="$CACHE/test-charm-poetry"
+  EVIDENCE="$TMPDIR/evidence"
+  mkdir -p "$CHARM_DIR" "$EVIDENCE"
+
+  # Build a synthetic Poetry charm.
+  cat > "$CHARM_DIR/pyproject.toml" <<'EOF'
+  [tool.poetry]
+  name = "test-charm-poetry"
+  version = "0.1.0"
+  description = "test"
+
+  [tool.poetry.dependencies]
+  python = "^3.10"
+  ops = ">=1.0"
+
+  [build-system]
+  requires = ["poetry-core"]
+  build-backend = "poetry.core.masonry.api"
+  EOF
+
+  # Generate an initial poetry.lock.
+  (cd "$CHARM_DIR" && poetry lock --no-update 2>&1) || true
+
+  # Save originals for comparison.
+  cp "$CHARM_DIR/pyproject.toml" "$EVIDENCE/original-pyproject.toml"
+  if test -f "$CHARM_DIR/poetry.lock"; then
+    cp "$CHARM_DIR/poetry.lock" "$EVIDENCE/original-poetry.lock"
+  fi
+
+  # tox.ini that captures the patched state during the run.
+  # Use poetry install so the patched pyproject.toml drives deps.
+  cat > "$CHARM_DIR/tox.ini" <<EOF
+  [tox]
+  env_list = unit
+  [testenv:unit]
+  allowlist_externals = bash, cp, cat, poetry
+  skip_install = true
+  commands =
+      bash -c "cat {toxinidir}/pyproject.toml > $EVIDENCE/patched-pyproject.toml"
+      bash -c "cat {toxinidir}/poetry.lock > $EVIDENCE/patched-poetry.lock || true"
+  EOF
+
+  cat > "$TMPDIR/super-tox.toml" <<'EOF'
+  [ignore]
+  EOF
+
+  output=$(super-tox \
+    --cache-folder "$CACHE" \
+    -c "$TMPDIR/super-tox.toml" \
+    -e unit \
+    --repo "test-charm-poetry" \
+    --log-level debug \
+    2>&1) || true
+  echo "$output"
+
+  echo "$output" | MATCH "out of.*runs passed"
+
+  # After the run, pyproject.toml should be restored to original.
+  diff "$CHARM_DIR/pyproject.toml" "$EVIDENCE/original-pyproject.toml"
+
+  # poetry.lock should also be restored.
+  if test -f "$EVIDENCE/original-poetry.lock"; then
+    diff "$CHARM_DIR/poetry.lock" "$EVIDENCE/original-poetry.lock"
+  fi
+
+  # Verify the patched pyproject.toml had the git ops dependency during the run.
+  echo "--- patched pyproject.toml (captured during tox run) ---"
+  cat "$EVIDENCE/patched-pyproject.toml"
+  grep 'ops.*git.*https://github.com/canonical/operator' "$EVIDENCE/patched-pyproject.toml"
+
+  # Verify the original ops version line was removed during patching.
+  if grep 'ops = ">=1.0"' "$EVIDENCE/patched-pyproject.toml"; then
+    echo "ERROR: original ops dependency was not removed during patching"
+    exit 1
+  fi
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

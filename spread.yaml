@@ -1,0 +1,66 @@
+project: charm-analysis
+kill-timeout: 30m
+workers: 1
+
+environment:
+  CI: "$(HOST: echo $CI)"
+  PROJECT_PATH: /root/proj
+
+backends:
+  github-ci:
+    type: adhoc
+    manual: true
+    allocate: |
+      # Set up SSH access on the runner itself.
+      sudo sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+      sudo sed -i 's/^KbdInteractiveAuthentication no/KbdInteractiveAuthentication yes/' /etc/ssh/sshd_config
+      sudo rm -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /etc/ssh/sshd_config.d/50-cloud-init.conf
+      sudo systemctl daemon-reload
+      sudo systemctl restart ssh
+
+      sudo useradd spread -s /bin/bash -m || true
+      echo "spread:$SPREAD_PASSWORD" | sudo chpasswd
+      echo 'spread ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/99-spread-user
+
+      ADDRESS "127.0.0.1"
+    discard: |
+      sudo userdel -f -r spread || true
+      sudo rm -f /etc/sudoers.d/99-spread-user
+    systems:
+      - ubuntu-24.04:
+          username: spread
+          workers: 1
+
+suites:
+  tests/spread/:
+    summary: Integration tests for charm-analysis tools
+
+prepare: |
+  # Make the git-to-SSH conversion work in CI (no SSH keys available).
+  git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+  # Install uv to a system-wide location.
+  curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+
+  # Install the project (with entry points) into a venv.
+  cd "$PROJECT_PATH"
+  uv venv
+  uv pip install -e .
+
+  # Create wrapper scripts that run via uv so the venv is activated.
+  printf '#!/bin/bash\nexec /usr/local/bin/uv run --project %s get-charms "$@"\n' "$PROJECT_PATH" > /usr/local/bin/get-charms
+  chmod +x /usr/local/bin/get-charms
+  printf '#!/bin/bash\nexec /usr/local/bin/uv run --project %s super-tox "$@"\n' "$PROJECT_PATH" > /usr/local/bin/super-tox
+  chmod +x /usr/local/bin/super-tox
+
+  # Ensure tox (with tox-uv) and poetry are available for super-tox tests.
+  uv tool install --with tox-uv tox
+  uv tool install poetry
+  # Symlink tool binaries so they're on PATH for test scripts.
+  ln -sf /root/.local/bin/tox /usr/local/bin/tox
+  ln -sf /root/.local/bin/poetry /usr/local/bin/poetry
+
+restore: |
+  git config --global --unset url."https://github.com/".insteadOf || true
+
+path: /root/proj

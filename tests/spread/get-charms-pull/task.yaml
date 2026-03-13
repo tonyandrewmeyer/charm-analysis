@@ -1,0 +1,40 @@
+summary: Pull already-cloned repositories without errors
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,,
+  EOF
+
+  # First run: clone.
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  test -d "$CACHE/self-signed-certificates-operator"
+
+  # Unshallow and move to an older revision so we can verify pull advances it.
+  git -C "$CACHE/self-signed-certificates-operator" fetch --unshallow --quiet
+  LATEST=$(git -C "$CACHE/self-signed-certificates-operator" rev-parse HEAD)
+  git -C "$CACHE/self-signed-certificates-operator" checkout HEAD~3 --quiet
+
+  BEFORE=$(git -C "$CACHE/self-signed-certificates-operator" rev-parse HEAD)
+  test "$BEFORE" != "$LATEST"
+
+  # Second run: should pull (not clone again).
+  output=$(get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv" 2>&1)
+
+  echo "$output" | MATCH "Pulling"
+
+  # After pull, HEAD should be back at the latest commit.
+  AFTER=$(git -C "$CACHE/self-signed-certificates-operator" rev-parse HEAD)
+  test "$AFTER" = "$LATEST"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

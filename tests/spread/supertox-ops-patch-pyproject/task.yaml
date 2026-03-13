@@ -1,0 +1,79 @@
+summary: Verify ops dependency patching in pyproject.toml
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+  CHARM_DIR="$CACHE/test-charm-pyproject"
+  EVIDENCE="$TMPDIR/evidence"
+  mkdir -p "$CHARM_DIR" "$EVIDENCE"
+
+  # Build a synthetic PEP 621 charm (no requirements.txt, ops in pyproject.toml).
+  cat > "$CHARM_DIR/pyproject.toml" <<'EOF'
+  [project]
+  name = "test-charm"
+  version = "0.1.0"
+  dependencies = [
+      "ops>=1.0",
+  ]
+  EOF
+
+  # tox.ini that captures the patched state during the run.
+  # The PEP 621 patcher creates a temporary requirements.txt, so reference it.
+  cat > "$CHARM_DIR/tox.ini" <<EOF
+  [tox]
+  env_list = unit
+  [testenv:unit]
+  deps = -r {toxinidir}/requirements.txt
+  allowlist_externals = bash, cp, cat
+  commands =
+      bash -c "cat {toxinidir}/pyproject.toml > $EVIDENCE/patched-pyproject.toml"
+      bash -c "cat {toxinidir}/requirements.txt > $EVIDENCE/patched-requirements.txt"
+  EOF
+
+  cat > "$TMPDIR/super-tox.toml" <<'EOF'
+  [ignore]
+  EOF
+
+  # No requirements.txt should exist before patching.
+  test ! -f "$CHARM_DIR/requirements.txt"
+
+  output=$(super-tox \
+    --cache-folder "$CACHE" \
+    -c "$TMPDIR/super-tox.toml" \
+    -e unit \
+    --repo "test-charm-pyproject" \
+    --log-level debug \
+    2>&1) || true
+  echo "$output"
+
+  echo "$output" | MATCH "out of.*runs passed"
+
+  # After the run, pyproject.toml should be restored.
+  grep "ops" "$CHARM_DIR/pyproject.toml"
+
+  # Temporary requirements.txt should be cleaned up.
+  if test -f "$CHARM_DIR/requirements.txt"; then
+    echo "ERROR: temporary requirements.txt was not cleaned up"
+    exit 1
+  fi
+
+  # Verify the temporary requirements.txt had the git source during the run.
+  echo "--- patched requirements.txt (captured during tox run) ---"
+  cat "$EVIDENCE/patched-requirements.txt"
+  grep "git+https://github.com/canonical/operator" "$EVIDENCE/patched-requirements.txt"
+
+  # Verify ops was stripped from pyproject.toml during the run.
+  echo "--- patched pyproject.toml (captured during tox run) ---"
+  cat "$EVIDENCE/patched-pyproject.toml"
+  if grep 'ops>=' "$EVIDENCE/patched-pyproject.toml"; then
+    echo "ERROR: ops was not stripped from pyproject.toml during patching"
+    exit 1
+  fi
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

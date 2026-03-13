@@ -1,0 +1,60 @@
+summary: Verify ops dependency patching in requirements.txt
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+  CHARM_DIR="$CACHE/test-charm"
+  EVIDENCE="$TMPDIR/evidence"
+  mkdir -p "$CHARM_DIR" "$EVIDENCE"
+
+  # Build a synthetic charm with a tox testenv that captures the patched
+  # requirements.txt content during the run.
+  cat > "$CHARM_DIR/requirements.txt" <<'EOF'
+  ops>=1.0
+  EOF
+
+  cat > "$CHARM_DIR/tox.ini" <<EOF
+  [tox]
+  env_list = unit
+  [testenv:unit]
+  deps = -r requirements.txt
+  allowlist_externals = cp
+  commands =
+      cp {toxinidir}/requirements.txt $EVIDENCE/patched-requirements.txt
+  EOF
+
+  cat > "$TMPDIR/super-tox.toml" <<'EOF'
+  [ignore]
+  EOF
+
+  # Run super-tox with ops patching enabled (default source).
+  output=$(super-tox \
+    --cache-folder "$CACHE" \
+    -c "$TMPDIR/super-tox.toml" \
+    -e unit \
+    --repo "test-charm" \
+    --log-level debug \
+    2>&1) || true
+  echo "$output"
+
+  echo "$output" | MATCH "out of.*runs passed"
+
+  # Verify requirements.txt was restored after patching.
+  grep -i "ops" "$CHARM_DIR/requirements.txt"
+  if grep "git+" "$CHARM_DIR/requirements.txt"; then
+    echo "ERROR: requirements.txt was not restored after patching"
+    exit 1
+  fi
+
+  # Verify the patched requirements.txt contained the git source during the run.
+  echo "--- patched requirements.txt (captured during tox run) ---"
+  cat "$EVIDENCE/patched-requirements.txt"
+  grep "git+https://github.com/canonical/operator" "$EVIDENCE/patched-requirements.txt"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

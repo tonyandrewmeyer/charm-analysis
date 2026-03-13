@@ -11,3 +11,4 @@ venv
 super-tox.toml
 .*.swp
 *.csv
+*.egg-info/

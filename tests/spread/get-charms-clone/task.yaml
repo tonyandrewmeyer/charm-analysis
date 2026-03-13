@@ -1,0 +1,29 @@
+summary: Clone repositories from a CSV file
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,,
+  Test,Element Web,https://github.com/canonical/element-web-operator,TRUE,,
+  EOF
+
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  # Verify both repos were cloned.
+  test -d "$CACHE/self-signed-certificates-operator"
+  test -d "$CACHE/element-web-operator"
+
+  # Verify they are valid git repos.
+  git -C "$CACHE/self-signed-certificates-operator" rev-parse --is-inside-work-tree
+  git -C "$CACHE/element-web-operator" rev-parse --is-inside-work-tree
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true
