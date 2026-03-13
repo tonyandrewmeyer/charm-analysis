@@ -38,7 +38,7 @@ def analyse_repo(repo: pathlib.Path, repack: bool):
         # Remove the build environment - otherwise, this ends up using a huge amount
         # of disk space (in /var/snap/lxd).
         subprocess.run(["charmcraft", "clean"], check=True, cwd=repo)
-    continuation = None
+    continuation: tuple[Path, str, str] | None = None
     for charm in repo.glob("*.charm"):
         # Run the analysis.
         charmcraft = subprocess.run(
@@ -52,8 +52,9 @@ def analyse_repo(repo: pathlib.Path, repack: bool):
                 # This is a continuation of a previous line, but there doesn't seem to be any way
                 # to programmatically determine that.
                 if continuation:
-                    full_line = f"{continuation[2]} {line}"
-                    logger.warning("%s (%s): %s", *continuation[:-1], full_line)
+                    repo, charm_name, prev_line = continuation
+                    full_line = f"{prev_line} {line}"
+                    logger.warning("%s (%s): %s", repo, charm_name, full_line)
                 continue
             if line.startswith((
                 "language: Charm language unknown",
@@ -108,7 +109,7 @@ def main(
     )
 
     total = 0
-    overall_results = collections.defaultdict(lambda: collections.Counter())
+    overall_results = collections.defaultdict(collections.Counter)
     repo_count = collections.Counter()
     by_repo = collections.Counter()
     for repo in iter_repositories(pathlib.Path(cache_folder)):
