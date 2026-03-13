@@ -54,7 +54,8 @@ async def clone(dest_folder: pathlib.Path, name: str, repository: str, branch: s
     clone = await asyncio.create_subprocess_exec(
         *args,
         repository,
-        cwd=dest_folder.parent.name,
+        str(dest_folder),
+        cwd=dest_folder.parent,
     )
     await clone.wait()
     if clone.returncode != 0:
