@@ -30,11 +30,9 @@ def main(cache_folder):
         handlers=[rich.logging.RichHandler()],
     )
 
-    total = 0
     names = set()
     k8s_names = set()
     for entry in iter_entries(pathlib.Path(cache_folder)):
-        total += 1
         charm_name = entry.parent.parent.name
         if charm_name.endswith("-operator"):
             charm_name = charm_name.rsplit("-", 1)[0]
