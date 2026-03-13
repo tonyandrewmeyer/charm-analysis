@@ -38,6 +38,7 @@ class ActionDefinition:
     name: str
     params: dict[str, ParamDef] = field(default_factory=dict)
     required_params: set[str] = field(default_factory=set)
+    additional_properties: bool | None = None  # None means not explicitly set in YAML
     source_file: str = ""
 
 
@@ -51,6 +52,15 @@ class ParamAccess:
 
 
 @dataclass
+class HandlerInfo:
+    """Information about a discovered action handler."""
+    handler_name: str
+    action_name: str
+    observe_file: pathlib.Path
+    is_self_method: bool  # True if observed as self.handler (vs. bare function)
+
+
+@dataclass
 class Violation:
     """A validation error."""
     action_name: str
@@ -60,6 +70,7 @@ class Violation:
     line_number: int
     file_path: str
     message: str
+    additional_properties: bool | None = None
 
 
 @dataclass
@@ -70,6 +81,7 @@ class Warning:
     line_number: int
     file_path: str
     message: str
+    additional_properties: bool | None = None
 
 
 @dataclass
@@ -103,6 +115,34 @@ def load_action_definitions(repo: pathlib.Path) -> dict[str, ActionDefinition]:
     """
     actions = {}
 
+    def _parse_action(action_name: str, action_spec: dict, source_file: str) -> ActionDefinition | None:
+        if not isinstance(action_spec, dict):
+            return None
+
+        params_dict = {}
+        params_section = action_spec.get("params") or action_spec.get("properties") or {}
+        required_list = action_spec.get("required", [])
+        additional_properties = action_spec.get("additionalProperties")  # None if not set in YAML
+
+        for param_name, param_spec in params_section.items():
+            if isinstance(param_spec, dict):
+                params_dict[param_name] = ParamDef(
+                    name=param_name,
+                    type=param_spec.get("type"),
+                    required=param_name in required_list,
+                    default=param_spec.get("default"),
+                )
+            else:
+                params_dict[param_name] = ParamDef(name=param_name)
+
+        return ActionDefinition(
+            name=action_name,
+            params=params_dict,
+            required_params=set(required_list),
+            additional_properties=additional_properties,
+            source_file=source_file,
+        )
+
     # Try actions.yaml first (standalone file)
     actions_yaml = repo / "actions.yaml"
     if actions_yaml.exists():
@@ -111,30 +151,9 @@ def load_action_definitions(repo: pathlib.Path) -> dict[str, ActionDefinition]:
                 actions_data = yaml.safe_load(f) or {}
 
             for action_name, action_spec in actions_data.items():
-                if not isinstance(action_spec, dict):
-                    continue
-
-                params_dict = {}
-                params_section = action_spec.get("params") or action_spec.get("properties") or {}
-                required_list = action_spec.get("required", [])
-
-                for param_name, param_spec in params_section.items():
-                    if isinstance(param_spec, dict):
-                        params_dict[param_name] = ParamDef(
-                            name=param_name,
-                            type=param_spec.get("type"),
-                            required=param_name in required_list,
-                            default=param_spec.get("default"),
-                        )
-                    else:
-                        params_dict[param_name] = ParamDef(name=param_name)
-
-                actions[action_name] = ActionDefinition(
-                    name=action_name,
-                    params=params_dict,
-                    required_params=set(required_list),
-                    source_file="actions.yaml",
-                )
+                action_def = _parse_action(action_name, action_spec, "actions.yaml")
+                if action_def:
+                    actions[action_name] = action_def
         except Exception as e:
             logger.warning(f"Failed to parse {actions_yaml}: {e}")
 
@@ -150,31 +169,9 @@ def load_action_definitions(repo: pathlib.Path) -> dict[str, ActionDefinition]:
                 # Skip if already loaded from actions.yaml
                 if action_name in actions:
                     continue
-
-                if not isinstance(action_spec, dict):
-                    continue
-
-                params_dict = {}
-                params_section = action_spec.get("params") or action_spec.get("properties") or {}
-                required_list = action_spec.get("required", [])
-
-                for param_name, param_spec in params_section.items():
-                    if isinstance(param_spec, dict):
-                        params_dict[param_name] = ParamDef(
-                            name=param_name,
-                            type=param_spec.get("type"),
-                            required=param_name in required_list,
-                            default=param_spec.get("default"),
-                        )
-                    else:
-                        params_dict[param_name] = ParamDef(name=param_name)
-
-                actions[action_name] = ActionDefinition(
-                    name=action_name,
-                    params=params_dict,
-                    required_params=set(required_list),
-                    source_file="charmcraft.yaml",
-                )
+                action_def = _parse_action(action_name, action_spec, "charmcraft.yaml")
+                if action_def:
+                    actions[action_name] = action_def
         except Exception as e:
             logger.warning(f"Failed to parse {charmcraft_yaml}: {e}")
 
@@ -196,16 +193,16 @@ def _normalize_action_name(event_name: str) -> str:
     return event_name.replace("_", "-")
 
 
-def find_action_handlers(module: pathlib.Path) -> dict[str, str]:
+def find_action_handlers(module: pathlib.Path) -> list[HandlerInfo]:
     """Find action event handlers and their action names.
 
     Args:
         module: Path to Python file
 
     Returns:
-        Dictionary mapping handler_method_name → action-name
+        List of HandlerInfo objects for each framework.observe() call found
     """
-    handlers = {}
+    handlers = []
 
     try:
         with module.open() as f:
@@ -245,16 +242,28 @@ def find_action_handlers(module: pathlib.Path) -> dict[str, str]:
         # Second arg: handler method
         handler_arg = node.args[1]
         handler_name = None
+        is_self_method = False
 
         if isinstance(handler_arg, ast.Attribute):
             handler_name = handler_arg.attr
+            # Check if it's self.<method>
+            is_self_method = (
+                isinstance(handler_arg.value, ast.Name)
+                and handler_arg.value.id == "self"
+            )
         elif isinstance(handler_arg, ast.Name):
             handler_name = handler_arg.id
+            is_self_method = False
 
         # Only track if it looks like an action event
         if event_name and handler_name and "_action" in event_name:
             action_name = _normalize_action_name(event_name)
-            handlers[handler_name] = action_name
+            handlers.append(HandlerInfo(
+                handler_name=handler_name,
+                action_name=action_name,
+                observe_file=module,
+                is_self_method=is_self_method,
+            ))
 
     return handlers
 
@@ -267,7 +276,7 @@ def _find_method_by_name(tree: ast.AST, method_name: str) -> ast.FunctionDef | N
     return None
 
 
-def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamAccess]:
+def extract_event_params(module: pathlib.Path, handler_name: str) -> tuple[list[ParamAccess], bool]:
     """Extract event.params accesses from a specific handler method.
 
     Args:
@@ -275,7 +284,7 @@ def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamA
         handler_name: Name of the handler method
 
     Returns:
-        List of ParamAccess objects
+        Tuple of (list of ParamAccess objects, bool indicating if handler was found)
     """
     accesses = []
 
@@ -284,22 +293,38 @@ def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamA
             tree = ast.parse(f.read())
     except Exception as e:
         logger.debug(f"Failed to parse {module}: {e}")
-        return accesses
+        return accesses, False
 
     # Find the handler method
     handler_method = _find_method_by_name(tree, handler_name)
     if not handler_method:
         logger.debug(f"Handler {handler_name} not found in {module}")
-        return accesses
+        return accesses, False
+
+    # Detect the event parameter name from the handler signature.
+    # Handler is typically: def handler(self, event) or def handler(event)
+    event_param_name = None
+    args = handler_method.args.args
+    if len(args) >= 2:
+        # self is first arg, event is second
+        event_param_name = args[1].arg
+    elif len(args) == 1:
+        event_param_name = args[0].arg
+
+    if not event_param_name:
+        logger.debug(f"Could not detect event parameter name for {handler_name} in {module}")
+        return accesses, True
 
     # Walk the handler method's AST
     for node in ast.walk(handler_method):
         # Pattern 1: event.params["key"] or event.params['key']
         if isinstance(node, ast.Subscript):
-            # Check if this is event.params[...]
+            # Check if this is <event_param>.params[...]
             if (
                 isinstance(node.value, ast.Attribute)
                 and node.value.attr == "params"
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == event_param_name
                 and isinstance(node.slice, ast.Constant)
                 and isinstance(node.slice.value, str)
             ):
@@ -319,6 +344,8 @@ def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamA
                 and node.func.attr == "get"
                 and isinstance(node.func.value, ast.Attribute)
                 and node.func.value.attr == "params"
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == event_param_name
                 and node.args
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)
@@ -336,6 +363,8 @@ def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamA
                     keyword.arg is None  # **kwargs pattern
                     and isinstance(keyword.value, ast.Attribute)
                     and keyword.value.attr == "params"
+                    and isinstance(keyword.value.value, ast.Name)
+                    and keyword.value.value.id == event_param_name
                 ):
                     accesses.append(ParamAccess(
                         param_name=None,
@@ -344,15 +373,14 @@ def extract_event_params(module: pathlib.Path, handler_name: str) -> list[ParamA
                         is_safe=True,
                     ))
 
-    return accesses
+    return accesses, True
 
 
-def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationResult | None, str | None]:
+def validate_charm(repo: pathlib.Path) -> tuple[ValidationResult | None, str | None]:
     """Validate action parameter usage for a single charm.
 
     Args:
         repo: Path to charm repository
-        entry: Path to charm entry point (src/charm.py)
 
     Returns:
         Tuple of (ValidationResult or None, skip_reason or None)
@@ -365,28 +393,28 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
     if not action_defs:
         return None, "no_actions"
 
-    # Find all Python files to scan (src/ and lib/)
-    python_files = []
-
-    # Add main charm entry
-    if entry.exists():
-        python_files.append(entry)
-
-    # Add lib files
+    # Find all Python files to scan.
+    # src/**/*.py is scanned for both observe() calls and handler definitions.
+    # lib/**/*.py is scanned for observe() calls (e.g. charm libraries).
+    src_files = sorted(repo.glob("src/**/*.py"))
     lib_dir = repo / "lib"
+    lib_files = []
     if lib_dir.exists():
-        for py_file in lib_dir.rglob("*.py"):
-            # Skip __pycache__ and test files
-            if "__pycache__" not in str(py_file) and "test" not in py_file.name.lower():
-                python_files.append(py_file)
+        lib_files = [
+            f for f in lib_dir.rglob("*.py")
+            if "__pycache__" not in str(f) and "test" not in f.name.lower()
+        ]
+    all_python_files = src_files + lib_files
 
-    # Find action handlers across all files
-    all_handlers = []
-    for py_file in python_files:
-        handlers = find_action_handlers(py_file)
-        for handler_name, action_name in handlers.items():
-            # Store handler name, action name, and file path
-            all_handlers.append((handler_name, action_name, py_file))
+    # Find action handlers across all files, deduplicating by (handler_name, action_name).
+    all_handlers: list[HandlerInfo] = []
+    seen: set[tuple[str, str]] = set()
+    for py_file in all_python_files:
+        for handler_info in find_action_handlers(py_file):
+            key = (handler_info.handler_name, handler_info.action_name)
+            if key not in seen:
+                seen.add(key)
+                all_handlers.append(handler_info)
 
     if not all_handlers:
         logger.debug(f"No action handlers found in {charm_name}")
@@ -399,7 +427,10 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
     )
 
     # Validate each handler
-    for handler_name, action_name, py_file in all_handlers:
+    for handler_info in all_handlers:
+        handler_name = handler_info.handler_name
+        action_name = handler_info.action_name
+
         # Check if action is defined
         if action_name not in action_defs:
             result.violations.append(Violation(
@@ -408,7 +439,7 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
                 param_name="N/A",
                 access_type="N/A",
                 line_number=0,
-                file_path=str(py_file.relative_to(repo)),
+                file_path=str(handler_info.observe_file.relative_to(repo)),
                 message=f"Handler exists but action '{action_name}' not defined in YAML",
             ))
             continue
@@ -416,41 +447,72 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
         action_def = action_defs[action_name]
         defined_params = set(action_def.params.keys())
 
-        # Extract param accesses
-        param_accesses = extract_event_params(py_file, handler_name)
+        # For non-self-method handlers (imported functions or SomeClass.method),
+        # we can't reliably locate the definition statically.
+        if not handler_info.is_self_method:
+            result.manual_review.append(ManualReview(
+                action_name=action_name,
+                line_number=0,
+                file_path=str(handler_info.observe_file.relative_to(repo)),
+                reason=f"Handler '{handler_name}' is not a self.method - may be imported, cannot validate statically",
+            ))
+            continue
+
+        # Try to find the handler definition: first in the observe file, then in all src files.
+        param_accesses, handler_found = extract_event_params(handler_info.observe_file, handler_name)
+        handler_file = handler_info.observe_file
+
+        if not handler_found:
+            for py_file in src_files:
+                if py_file == handler_info.observe_file:
+                    continue
+                param_accesses, handler_found = extract_event_params(py_file, handler_name)
+                if handler_found:
+                    handler_file = py_file
+                    break
+
+        if not handler_found:
+            result.manual_review.append(ManualReview(
+                action_name=action_name,
+                line_number=0,
+                file_path=str(handler_info.observe_file.relative_to(repo)),
+                reason=f"Handler '{handler_name}' definition not found in src/ - may be defined elsewhere",
+            ))
+            continue
 
         for access in param_accesses:
             if access.access_type == 'spread':
-                # Flag for manual review
                 result.manual_review.append(ManualReview(
                     action_name=action_name,
                     line_number=access.line_number,
-                    file_path=str(py_file.relative_to(repo)),
+                    file_path=str(handler_file.relative_to(repo)),
                     reason="Spread operator (**event.params) - cannot validate statically",
                 ))
-            elif access.param_name:
-                # Check if parameter is defined
-                if access.param_name not in defined_params:
-                    if access.access_type == 'subscript':
-                        # Error for direct access
-                        result.violations.append(Violation(
-                            action_name=action_name,
-                            handler_name=handler_name,
-                            param_name=access.param_name,
-                            access_type='[]',
-                            line_number=access.line_number,
-                            file_path=str(py_file.relative_to(repo)),
-                            message=f"Parameter '{access.param_name}' accessed but not defined in {action_def.source_file}",
-                        ))
-                    elif access.access_type == 'get':
-                        # Warning for .get() access
-                        result.warnings.append(Warning(
-                            action_name=action_name,
-                            param_name=access.param_name,
-                            line_number=access.line_number,
-                            file_path=str(py_file.relative_to(repo)),
-                            message=f"Parameter '{access.param_name}' accessed via .get() but not defined in {action_def.source_file}",
-                        ))
+            elif access.param_name and access.param_name not in defined_params:
+                # If additionalProperties is explicitly True, skip (intentional extra params)
+                if action_def.additional_properties is True:
+                    continue
+
+                if access.access_type == 'subscript':
+                    result.violations.append(Violation(
+                        action_name=action_name,
+                        handler_name=handler_name,
+                        param_name=access.param_name,
+                        access_type='[]',
+                        line_number=access.line_number,
+                        file_path=str(handler_file.relative_to(repo)),
+                        message=f"Parameter '{access.param_name}' accessed but not defined in {action_def.source_file}",
+                        additional_properties=action_def.additional_properties,
+                    ))
+                elif access.access_type == 'get':
+                    result.warnings.append(Warning(
+                        action_name=action_name,
+                        param_name=access.param_name,
+                        line_number=access.line_number,
+                        file_path=str(handler_file.relative_to(repo)),
+                        message=f"Parameter '{access.param_name}' accessed via .get() but not defined in {action_def.source_file}",
+                        additional_properties=action_def.additional_properties,
+                    ))
 
     return result, None
 
@@ -512,14 +574,20 @@ def report(results: list[ValidationResult], console: rich.console.Console, skip_
         table.add_column("Action", style="yellow")
         table.add_column("Parameter", style="magenta")
         table.add_column("Location", style="green")
+        table.add_column("additionalProperties", style="white")
 
         for result in results:
             for v in result.violations:
+                add_props = (
+                    "not set" if v.additional_properties is None
+                    else str(v.additional_properties)
+                )
                 table.add_row(
                     result.charm_name,
                     v.action_name,
                     v.param_name,
                     f"{v.file_path}:{v.line_number}",
+                    add_props,
                 )
 
         console.print(table)
@@ -534,21 +602,27 @@ def report(results: list[ValidationResult], console: rich.console.Console, skip_
         table.add_column("Action", style="yellow")
         table.add_column("Parameter", style="magenta")
         table.add_column("Location", style="green")
+        table.add_column("additionalProperties", style="white")
 
         for result in results:
             for w in result.warnings:
+                add_props = (
+                    "not set" if w.additional_properties is None
+                    else str(w.additional_properties)
+                )
                 table.add_row(
                     result.charm_name,
                     w.action_name,
                     w.param_name,
                     f"{w.file_path}:{w.line_number}",
+                    add_props,
                 )
 
         console.print(table)
 
     # Manual review table
     if total_manual_review > 0:
-        console.print("\n[bold blue]MANUAL REVIEW: Spread operator usage[/bold blue]")
+        console.print("\n[bold blue]MANUAL REVIEW: Handlers and spread operators requiring manual inspection[/bold blue]")
         console.print("═" * 80)
 
         table = rich.table.Table(show_header=True, header_style="bold blue")
@@ -604,13 +678,26 @@ def main(cache_folder, strict, output_csv, verbose):
     }
 
     for repo in iter_repositories(cache_path):
-        # Find charm entry point
-        entry = repo / "src" / "charm.py"
-        if not entry.exists():
+        # Use the same entry point resolution as iter_entries() in helpers.py
+        entry = "src/charm.py"
+        if (repo / "charmcraft.yaml").exists():
+            try:
+                with (repo / "charmcraft.yaml").open() as f:
+                    charmcraft_data = yaml.safe_load(f) or {}
+                entry = (
+                    charmcraft_data.get("parts", {})
+                    .get("charm", {})
+                    .get("charm-entrypoint", entry)
+                )
+            except Exception as e:
+                logger.debug("Failed to read charmcraft.yaml entrypoint for %s: %s", repo, e)
+
+        # Skip repos with no Python source at all
+        if not (repo / entry).exists() and next(repo.glob("src/**/*.py"), None) is None:
             continue
 
         skip_stats["total"] += 1
-        result, skip_reason = validate_charm(repo, entry)
+        result, skip_reason = validate_charm(repo)
 
         if skip_reason:
             skip_stats[skip_reason] = skip_stats.get(skip_reason, 0) + 1
@@ -623,7 +710,7 @@ def main(cache_folder, strict, output_csv, verbose):
     # Output CSV if requested
     if output_csv:
         writer = csv.writer(output_csv)
-        writer.writerow(["charm", "action", "parameter", "access_type", "line", "file", "severity", "defined_params"])
+        writer.writerow(["charm", "action", "parameter", "access_type", "line", "file", "severity", "additionalProperties"])
 
         for result in results:
             for v in result.violations:
@@ -635,7 +722,7 @@ def main(cache_folder, strict, output_csv, verbose):
                     v.line_number,
                     v.file_path,
                     "error",
-                    "",  # Could add defined params here
+                    "" if v.additional_properties is None else v.additional_properties,
                 ])
 
             for w in result.warnings:
@@ -647,7 +734,7 @@ def main(cache_folder, strict, output_csv, verbose):
                     w.line_number,
                     w.file_path,
                     "warning",
-                    "",
+                    "" if w.additional_properties is None else w.additional_properties,
                 ])
 
         console.print(f"\n[green]CSV output written to {output_csv.name}[/green]")
