@@ -94,6 +94,8 @@ def main(cache_folder):
                 test_frameworks["pytest"] += 1
             if "pytest_operator.plugin" in repo_test_imports:
                 test_frameworks["pytest_operator"] += 1
+            if "jubilant" in repo_test_imports:
+                test_frameworks["jubilant"] += 1
             if "zaza" in repo_test_imports:
                 # TODO: I'm not sure if this is always required - it seems like
                 # there is always a tests.yaml file, but not at the top level,
@@ -131,6 +133,7 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
             ("Harness", test_imports["ops.testing"]),
             ("Scenario", test_imports["scenario"]),
             ("pytest-operator", test_imports["pytest_operator.plugin"]),
+            ("jubilant", test_imports["jubilant"]),
             ("zaza", test_imports["zaza"]),
         ),
     )
