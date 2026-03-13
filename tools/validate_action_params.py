@@ -381,12 +381,12 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
                 python_files.append(py_file)
 
     # Find action handlers across all files
-    all_handlers = {}
+    all_handlers = []
     for py_file in python_files:
         handlers = find_action_handlers(py_file)
         for handler_name, action_name in handlers.items():
-            # Store both handler name and file path
-            all_handlers[handler_name] = (action_name, py_file)
+            # Store handler name, action name, and file path
+            all_handlers.append((handler_name, action_name, py_file))
 
     if not all_handlers:
         logger.debug(f"No action handlers found in {charm_name}")
@@ -399,7 +399,7 @@ def validate_charm(repo: pathlib.Path, entry: pathlib.Path) -> tuple[ValidationR
     )
 
     # Validate each handler
-    for handler_name, (action_name, py_file) in all_handlers.items():
+    for handler_name, action_name, py_file in all_handlers:
         # Check if action is defined
         if action_name not in action_defs:
             result.violations.append(Violation(
