@@ -1,5 +1,15 @@
 #! /usr/bin/env python
 
+"""Identify charms that have both machine and Kubernetes variants.
+
+A "pair" is defined as a charm that exists both as a machine charm and as
+a Kubernetes charm sharing the same base name. Charm names are normalized
+by stripping a trailing "-operator" suffix if present. Kubernetes charms
+are expected to use a "-k8s" suffix (optionally followed by "-operator"),
+while machine charms omit the "-k8s" suffix. The script prints the base
+names for which both forms are found in the cached charm entries.
+"""
+
 import logging
 import pathlib
 
