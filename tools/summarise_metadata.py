@@ -55,7 +55,7 @@ def summarise_actions(repo: pathlib.Path):
             has_execution_group += 1
         params_count[len(action.get("params", ()))] += 1
         for param_name, param in action.get("params", {}).items():
-            actions_by_type[param["type"]] += 1
+            actions_by_type[param.get("type", "unknown")] += 1
             if "default" in param:
                 defaults.add(str(param["default"]))
             if "properties" in param:
