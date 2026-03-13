@@ -665,4 +665,4 @@ def main(cache_folder, strict, output_csv, verbose):
 
 
 if __name__ == "__main__":
-    exit(main())
+    main()
