@@ -236,17 +236,48 @@ def patch_ops(location: pathlib.Path):
                 # Instead, use [tool.uv.sources] to override where ops comes
                 # from, and re-add the ops lines we stripped earlier.
                 patched_content = original  # start fresh, keeping all deps
-                # Add uv source override.
+                # Build source override entries for ops and companion packages.
                 if settings.ops_source_branch:
-                    uv_source = f'\n[tool.uv.sources]\nops = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}\n'
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}']
                 else:
-                    uv_source = f'\n[tool.uv.sources]\nops = {{ git = "{settings.ops_source}" }}\n'
-                patched_content += uv_source
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}" }}']
+                # When extras like "testing" or "tracing" are used, their
+                # companion packages must also come from the monorepo source.
+                extra_packages = {
+                    "testing": ("ops-scenario", "testing"),
+                    "tracing": ("ops-tracing", "tracing"),
+                }
+                companion_deps = []
+                for extra_name, (pkg_name, subdir) in extra_packages.items():
+                    if extra_name not in ops_extras:
+                        continue
+                    if settings.ops_source_branch:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}", subdirectory = "{subdir}" }}')
+                    else:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", subdirectory = "{subdir}" }}')
+                    companion_deps.append(pkg_name)
+                # Merge into existing [tool.uv.sources] if present, else add new.
+                source_entries = "\n".join(source_lines)
+                if "[tool.uv.sources]" in patched_content:
+                    patched_content = patched_content.replace(
+                        "[tool.uv.sources]",
+                        f"[tool.uv.sources]\n{source_entries}",
+                    )
+                else:
+                    patched_content += f"\n[tool.uv.sources]\n{source_entries}\n"
+                # Add companion packages as direct dependencies so uv accepts
+                # the URL source override for transitive deps.
+                if companion_deps:
+                    dep_entries = ", ".join(f'"{d}"' for d in companion_deps)
+                    patched_content = patched_content.replace(
+                        "dependencies = [",
+                        f"dependencies = [\n  {dep_entries},",
+                    )
                 # Also bump requires-python to >=3.10 if it's lower, since
                 # ops HEAD requires it and uv validates across all declared
                 # Python versions.
                 patched_content = re.sub(
-                    r'requires-python\s*=\s*">=3\.[0-9]"',
+                    r'requires-python\s*=\s*"[~>]=3\.[89](\.\d+)?"',
                     'requires-python = ">=3.10"',
                     patched_content,
                 )
@@ -350,9 +381,13 @@ def patch_ops(location: pathlib.Path):
             if original_poetry_lock is not None:
                 with poetry_lock.open("w") as lock:
                     lock.write(original_poetry_lock)
+            elif poetry_lock.exists():
+                poetry_lock.unlink()
             if original_uv_lock is not None:
                 with uv_lock.open("w") as lock:
                     lock.write(original_uv_lock)
+            elif uv_lock.exists():
+                uv_lock.unlink()
     else:
         raise NotImplementedError(
             f"Only know how to patch requirements.txt and pyproject.toml (in {location})"
