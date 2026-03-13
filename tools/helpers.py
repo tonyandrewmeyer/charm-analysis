@@ -70,7 +70,9 @@ def iter_entries(base: pathlib.Path):
                 except KeyError:
                     pass
         if not (repo / entry).exists():
-            logger.warning("Unable to find entrypoint for %s (guessed %s).", repo, entry)
+            logger.warning(
+                "Unable to find entrypoint for %s (guessed %s).", repo, entry
+            )
             continue
         yield (repo / entry)
 
