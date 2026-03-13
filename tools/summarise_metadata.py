@@ -187,11 +187,9 @@ def main(cache_folder: str):
     )
     logger.info("%s charms have parallel set", has_parallel)
     logger.info("%s charms have execution-group set", has_execution_group)
-    import pprint
-
-    pprint.pprint(action_defaults)
-    pprint.pprint(actions_by_type)
-    pprint.pprint(actions_required_percentage)
+    logger.info("Action defaults: %s", action_defaults)
+    logger.info("Actions by type: %s", actions_by_type)
+    logger.info("Actions required percentage: %s", actions_required_percentage)
 
     assert (
         not assumes_any and not assumes_all
