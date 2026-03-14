@@ -1,0 +1,31 @@
+summary: Clone a specific branch and verify folder naming
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  # Use a non-default branch.
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,latest,
+  EOF
+
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  # Folder should include the branch suffix.
+  test -d "$CACHE/self-signed-certificates-operator-latest"
+
+  # And a folder without the suffix should NOT exist.
+  test ! -d "$CACHE/self-signed-certificates-operator"
+
+  # Verify the correct branch is checked out.
+  BRANCH=$(git -C "$CACHE/self-signed-certificates-operator-latest" rev-parse --abbrev-ref HEAD)
+  test "$BRANCH" = "latest"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

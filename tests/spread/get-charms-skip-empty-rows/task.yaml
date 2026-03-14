@@ -1,0 +1,28 @@
+summary: Skip rows with empty Repository field
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  # Rows 2 and 4 have empty Repository fields.
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Empty One,,TRUE,,
+  Test,Self Signed Certificates,https://github.com/canonical/self-signed-certificates-operator,TRUE,,
+  Test,Empty Two,,FALSE,,
+  EOF
+
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  # Only the valid repo should be cloned.
+  COUNT=$(find "$CACHE" -mindepth 1 -maxdepth 1 -type d | wc -l)
+  test "$COUNT" -eq 1
+  test -d "$CACHE/self-signed-certificates-operator"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true

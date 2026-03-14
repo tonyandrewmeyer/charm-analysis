@@ -4,11 +4,11 @@ A collection of utilities to perform analysis on a set of charms.
 
 ## Tools
 
-### get_charms
+### get-charms
 
 ```shellscript
-$ python get_charms.py --help
-Usage: get_charms.py [OPTIONS] CHARM_LIST
+$ get-charms --help
+Usage: get-charms [OPTIONS] CHARM_LIST
 
   Ensure updated repositories for all the charms from the provided list.
 
@@ -385,9 +385,9 @@ Run a tox environment across all of the charms at once.
 To specify the `tox` to use, pass the executable with the `--executable` flag,
 for example:
 
-* `super-tox.py --executable=~/.local/bin/tox`
-* `super-tox.py --executable='uvx tox'
-* `super-tox.py --executable='uvx --python=3.8 tox'
+* `super-tox --executable=~/.local/bin/tox`
+* `super-tox --executable='uvx tox'
+* `super-tox --executable='uvx --python=3.8 tox'
 
 A configuration file can be provided to skip repositories if required, in the
 form:

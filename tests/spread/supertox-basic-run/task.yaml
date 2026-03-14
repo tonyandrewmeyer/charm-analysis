@@ -1,0 +1,38 @@
+summary: Run tox on a single charm repository
+systems:
+  - ubuntu-24.04
+
+execute: |
+  cd "$PROJECT_PATH"
+  TMPDIR="$(mktemp -d)"
+  CACHE="$TMPDIR/cache"
+
+  # Clone a small charm with a unit test environment.
+  cat > "$TMPDIR/test-charms.csv" <<'EOF'
+  Team,Charm Name,Repository,Key Charm for this Team,Branch (if not the default),Notes
+  Test,Element Web,https://github.com/canonical/element-web-operator,TRUE,,
+  EOF
+  get-charms --cache-folder "$CACHE" "$TMPDIR/test-charms.csv"
+
+  # Minimal config (no ignore lists).
+  cat > "$TMPDIR/super-tox.toml" <<'EOF'
+  [ignore]
+  EOF
+
+  # Run super-tox filtering to just this repo.
+  output=$(super-tox \
+    --cache-folder "$CACHE" \
+    -c "$TMPDIR/super-tox.toml" \
+    -e unit \
+    --repo "element-web-operator" \
+    --ops-source "" \
+    2>&1) || true
+  echo "$output"
+
+  # Should print a summary line.
+  echo "$output" | MATCH "out of.*runs passed"
+
+  rm -rf "$TMPDIR"
+
+restore: |
+  true
