@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class Settings:
     executable: str
+    poetry_executable: str
     mode: typing.Literal["local", "lxd", "lxd-per-tox"]
     lxd_name: str
     lxd_image_alias: str
@@ -201,7 +202,7 @@ def patch_ops(location: pathlib.Path):
         if "poetry" in adjusted.get("tool", {}):
             try:
                 subprocess.run(
-                    ["poetry", "lock", "--no-update"],
+                    [*shlex.split(settings.poetry_executable), "lock"],
                     cwd=location,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -534,6 +535,7 @@ def fixme(f):
 @click.option("--verbose/--no-verbose", default=False, help="additional output")
 @click.option("--sample", default=0, help="try to run only this many repositories")
 @click.option("--executable", default="tox")
+@click.option("--poetry-executable", default="poetry")
 @click.command()
 def main(
     cache_folder: str,
