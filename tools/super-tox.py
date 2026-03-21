@@ -55,6 +55,7 @@ def _patch_requirements_file(requirements: pathlib.Path):
     content."""
     original = []
     adjusted = []
+    ops_extras: set[str] = set()
     with requirements.open() as req:
         for line in req:
             original.append(line)
@@ -95,10 +96,32 @@ def _patch_requirements_file(requirements: pathlib.Path):
                 continue
             if req.name != "ops":
                 adjusted.append(line)
+            else:
+                ops_extras.update(req.extras)
+    extras_str = f"[{','.join(sorted(ops_extras))}]" if ops_extras else ""
     if settings.ops_source_branch:
-        adjusted.append(f"\ngit+{settings.ops_source}@{settings.ops_source_branch}\n")
+        adjusted.append(f"\nops{extras_str} @ git+{settings.ops_source}@{settings.ops_source_branch}\n")
     else:
-        adjusted.append(f"\ngit+{settings.ops_source}\n")
+        adjusted.append(f"\nops{extras_str} @ git+{settings.ops_source}\n")
+    # When extras like "testing" or "tracing" are used, their corresponding
+    # packages must also come from the same git source (they live in
+    # subdirectories of the operator monorepo).
+    extra_packages = {
+        "testing": ("ops-scenario", "testing"),
+        "tracing": ("ops-tracing", "tracing"),
+    }
+    for extra_name, (pkg_name, subdir) in extra_packages.items():
+        if extra_name not in ops_extras:
+            continue
+        adjusted = [
+            line for line in adjusted
+            if not line.strip().startswith(pkg_name)
+            or line.strip().startswith(f"{pkg_name}-")
+        ]
+        if settings.ops_source_branch:
+            adjusted.append(f"\n{pkg_name} @ git+{settings.ops_source}@{settings.ops_source_branch}#subdirectory={subdir}\n")
+        else:
+            adjusted.append(f"\n{pkg_name} @ git+{settings.ops_source}#subdirectory={subdir}\n")
     with requirements.open("w") as req:
         req.write("\n".join(adjusted))
     return "".join(original)
@@ -139,6 +162,12 @@ def patch_ops(location: pathlib.Path):
                 original_poetry_lock = data.read()
         else:
             original_poetry_lock = None
+        uv_lock = location / "uv.lock"
+        if uv_lock.exists():
+            with uv_lock.open() as data:
+                original_uv_lock = data.read()
+        else:
+            original_uv_lock = None
         with pyproject.open("rb") as data:
             adjusted = tomllib.load(data)
 
@@ -147,6 +176,38 @@ def patch_ops(location: pathlib.Path):
             ops_git_line = f"git+{settings.ops_source}@{settings.ops_source_branch}"
         else:
             ops_git_line = f"git+{settings.ops_source}"
+
+        # Collect any extras specified for ops across all dependency groups.
+        ops_extras: set[str] = set()
+        for section_key in ("dependencies", "dev-dependencies"):
+            poetry_deps = adjusted.get("tool", {}).get("poetry", {}).get(section_key, {})
+            if "ops" in poetry_deps:
+                dep = poetry_deps["ops"]
+                if isinstance(dep, dict) and "extras" in dep:
+                    ops_extras.update(dep["extras"])
+        # Also check Poetry dependency groups (e.g. [tool.poetry.group.unit.dependencies]).
+        for group in adjusted.get("tool", {}).get("poetry", {}).get("group", {}).values():
+            group_deps = group.get("dependencies", {})
+            if "ops" in group_deps:
+                dep = group_deps["ops"]
+                if isinstance(dep, dict) and "extras" in dep:
+                    ops_extras.update(dep["extras"])
+        # Also check PEP 621 style dependencies.
+        for dep_str in adjusted.get("project", {}).get("dependencies", []):
+            try:
+                req = packaging.requirements.Requirement(dep_str)
+                if req.name == "ops":
+                    ops_extras.update(req.extras)
+            except packaging.requirements.InvalidRequirement:
+                pass
+        for opt_deps in adjusted.get("project", {}).get("optional-dependencies", {}).values():
+            for dep_str in opt_deps:
+                try:
+                    req = packaging.requirements.Requirement(dep_str)
+                    if req.name == "ops":
+                        ops_extras.update(req.extras)
+                except packaging.requirements.InvalidRequirement:
+                    pass
 
         # Do string-based patching on the original content, since tomllib
         # can only read (not write) TOML. We remove any line that looks
@@ -166,26 +227,100 @@ def patch_ops(location: pathlib.Path):
 
         # For [project] style, inject into dependencies list; for poetry,
         # inject into [tool.poetry.dependencies].
+        is_uv_project = uv_lock.exists() or "uv" in adjusted.get("tool", {})
         if "project" in adjusted and "dependencies" in adjusted["project"]:
-            # PEP 621 style: add ops as a PEP 508 string in the dependencies list.
-            patched_content = patched_content.replace(
-                "[project]",
-                "[project]",  # keep the header
-            )
-            # Append a requirements.txt alongside for the ops override.
-            # The simplest reliable approach: create a temporary requirements
-            # file that will be picked up by the build.
-            ops_req = location / "requirements.txt"
-            if not ops_req.exists():
-                ops_req.write_text(f"{ops_git_line}\n")
-                # Track that we created it so we can clean up.
-                patched_content = patched_content  # no-op, cleanup below
-        elif "tool" in adjusted and "poetry" in adjusted["tool"]:
-            # Poetry style: add ops as a git dependency.
-            if settings.ops_source_branch:
-                ops_toml = f'\nops = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}"}}\n'
+            if is_uv_project:
+                # For uv-based projects, don't remove ops from dependencies.
+                # Instead, use [tool.uv.sources] to override where ops comes
+                # from, and re-add the ops lines we stripped earlier.
+                patched_content = original  # start fresh, keeping all deps
+                # Build source override entries for ops and companion packages.
+                if settings.ops_source_branch:
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}']
+                else:
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}" }}']
+                # When extras like "testing" or "tracing" are used, their
+                # companion packages must also come from the monorepo source.
+                extra_packages = {
+                    "testing": ("ops-scenario", "testing"),
+                    "tracing": ("ops-tracing", "tracing"),
+                }
+                companion_deps = []
+                for extra_name, (pkg_name, subdir) in extra_packages.items():
+                    if extra_name not in ops_extras:
+                        continue
+                    if settings.ops_source_branch:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}", subdirectory = "{subdir}" }}')
+                    else:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", subdirectory = "{subdir}" }}')
+                    companion_deps.append(pkg_name)
+                # Merge into existing [tool.uv.sources] if present, else add new.
+                source_entries = "\n".join(source_lines)
+                if "[tool.uv.sources]" in patched_content:
+                    patched_content = patched_content.replace(
+                        "[tool.uv.sources]",
+                        f"[tool.uv.sources]\n{source_entries}",
+                    )
+                else:
+                    patched_content += f"\n[tool.uv.sources]\n{source_entries}\n"
+                # Add companion packages as direct dependencies so uv accepts
+                # the URL source override for transitive deps.
+                if companion_deps:
+                    dep_entries = ", ".join(f'"{d}"' for d in companion_deps)
+                    patched_content = patched_content.replace(
+                        "dependencies = [",
+                        f"dependencies = [\n  {dep_entries},",
+                    )
+                # Also bump requires-python to >=3.10 if it's lower, since
+                # ops HEAD requires it and uv validates across all declared
+                # Python versions.
+                patched_content = re.sub(
+                    r'requires-python\s*=\s*"[~>]=3\.[89](\.\d+)?"',
+                    'requires-python = ">=3.10"',
+                    patched_content,
+                )
             else:
-                ops_toml = f'\nops = {{git = "{settings.ops_source}"}}\n'
+                # Non-uv PEP 621 style: inject ops back into the dependencies list.
+                extras_str = f"[{','.join(sorted(ops_extras))}]" if ops_extras else ""
+                ops_pep508 = f"ops{extras_str} @ {ops_git_line}"
+                # Insert the ops dependency line into the [project] dependencies array.
+                patched_content = patched_content.replace(
+                    "dependencies = [",
+                    f'dependencies = [\n  "{ops_pep508}",',
+                )
+        elif "tool" in adjusted and "poetry" in adjusted["tool"]:
+            # Poetry style: add ops as a git dependency, preserving extras.
+            extras_list = f', extras = [{", ".join(repr(e) for e in sorted(ops_extras))}]' if ops_extras else ""
+            if settings.ops_source_branch:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}"{extras_list}}}\n'
+            else:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}"{extras_list}}}\n'
+            # When extras like "testing" or "tracing" are used, their
+            # corresponding packages (ops-scenario, ops-tracing) must also
+            # come from the same git source. They live in subdirectories of
+            # the operator monorepo and their dev versions aren't on PyPI.
+            extra_packages = {
+                "testing": ("ops-scenario", "testing"),
+                "tracing": ("ops-tracing", "tracing"),
+            }
+            for extra_name, (pkg_name, subdir) in extra_packages.items():
+                if extra_name not in ops_extras:
+                    continue
+                # Remove any existing dependency lines for this package.
+                new_lines = []
+                for line in patched_content.splitlines(keepends=True):
+                    stripped = line.split("#", 1)[0].strip().strip('"').strip("'")
+                    if stripped.startswith(f"{pkg_name} ") or stripped.startswith(f"{pkg_name}=") or stripped == pkg_name:
+                        continue
+                    if re.match(rf'^{re.escape(pkg_name)}\s*=', stripped):
+                        continue
+                    new_lines.append(line)
+                patched_content = "".join(new_lines)
+                if settings.ops_source_branch:
+                    extra_toml = f'\n{pkg_name} = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}", subdirectory = "{subdir}"}}\n'
+                else:
+                    extra_toml = f'\n{pkg_name} = {{git = "{settings.ops_source}", subdirectory = "{subdir}"}}\n'
+                ops_toml += extra_toml
             # Insert after [tool.poetry.dependencies] header.
             patched_content = patched_content.replace(
                 "[tool.poetry.dependencies]",
@@ -198,15 +333,44 @@ def patch_ops(location: pathlib.Path):
         # Some charms require running poetry lock after this change.
         if "poetry" in adjusted.get("tool", {}):
             try:
-                subprocess.run(
+                result = subprocess.run(
                     [*shlex.split(settings.poetry_executable), "lock"],
                     cwd=location,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     check=False,
                 )
+                if result.returncode != 0:
+                    logger.warning(
+                        "poetry lock failed for %s: %s",
+                        location,
+                        result.stderr.decode().strip(),
+                    )
+                    # If poetry lock fails (e.g. due to unresolvable dev
+                    # dependencies), remove the lock file so that
+                    # `poetry install` doesn't refuse to run.
+                    if poetry_lock.exists():
+                        poetry_lock.unlink()
             except FileNotFoundError:
                 logger.warning("poetry not found, skipping poetry lock for %s", location)
+        # Similarly, uv-based projects need their lock file updated.
+        if uv_lock.exists():
+            try:
+                result = subprocess.run(
+                    ["uv", "lock"],
+                    cwd=location,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "uv lock failed for %s: %s",
+                        location,
+                        result.stderr.decode().strip(),
+                    )
+            except FileNotFoundError:
+                logger.warning("uv not found, skipping uv lock for %s", location)
         try:
             yield pyproject
         finally:
@@ -215,12 +379,13 @@ def patch_ops(location: pathlib.Path):
             if original_poetry_lock is not None:
                 with poetry_lock.open("w") as lock:
                     lock.write(original_poetry_lock)
-            # Clean up temporary requirements.txt if we created one.
-            temp_req = location / "requirements.txt"
-            if temp_req.exists() and "project" in adjusted and "dependencies" in adjusted.get("project", {}):
-                # Only remove if there wasn't one originally.
-                if "requirements.txt" not in original:
-                    temp_req.unlink(missing_ok=True)
+            elif poetry_lock.exists():
+                poetry_lock.unlink()
+            if original_uv_lock is not None:
+                with uv_lock.open("w") as lock:
+                    lock.write(original_uv_lock)
+            elif uv_lock.exists():
+                uv_lock.unlink()
     else:
         raise NotImplementedError(
             f"Only know how to patch requirements.txt and pyproject.toml (in {location})"
