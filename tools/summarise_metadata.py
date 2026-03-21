@@ -9,8 +9,8 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
 import yaml
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -90,13 +90,7 @@ def summarise_actions(repo: pathlib.Path):
 @click.command()
 def main(cache_folder: str):
     """Output simple statistics about the metadata provided by the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     total_actions = 0
@@ -129,7 +123,11 @@ def main(cache_folder: str):
             logger.warning("Cannot find metadata for %s", repo)
             continue
         with yaml_file.open() as source:
-            metadata = yaml.safe_load(source)
+            try:
+                metadata = yaml.safe_load(source)
+            except yaml.YAMLError:
+                logger.warning("Failed to parse %s", yaml_file)
+                continue
         for assumption in metadata.get("assumes", ()):
             if isinstance(assumption, dict):
                 for assumpt in assumption.get("any-of", ()):
@@ -197,16 +195,6 @@ def main(cache_folder: str):
     assert not devices, "Found some devices, add them to the report!"
     report(total, juju, assumes, containers, resources, relations, storages)
 
-
-#    pprint.pprint(juju)
-#    pprint.pprint(assumes)
-#    pprint.pprint(assumes_all)
-#    pprint.pprint(assumes_any)
-#    pprint.pprint(containers)
-#    pprint.pprint(resources)
-#    pprint.pprint(relations)
-#    pprint.pprint(storages)
-#    pprint.pprint(devices)
 
 
 def report(total, juju, assumes, containers, resources, relations, storages):

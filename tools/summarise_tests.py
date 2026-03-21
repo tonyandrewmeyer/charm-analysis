@@ -11,17 +11,17 @@ import pathlib
 
 import click
 import rich.console
-import rich.logging
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 def tox_ini(
     location: pathlib.Path, tox: collections.Counter, static: collections.Counter
 ):
-    tox_conf = configparser.ConfigParser()
+    tox_conf = configparser.ConfigParser(interpolation=None)
     tox_conf.read(location)
     for section in tox_conf.sections():
         if section.startswith("testenv:"):
@@ -39,7 +39,11 @@ def tox_ini(
 def find_imports(module):
     """Iterate through the names of the modules imported by the specified module."""
     with module.open() as raw:
-        tree = ast.parse(raw.read())
+        try:
+            tree = ast.parse(raw.read())
+        except SyntaxError:
+            logger.warning("Failed to parse %s", module)
+            return
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             yield node.module
@@ -64,13 +68,7 @@ def find_test_imports(base):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the tests of the charms."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     uses_tox = 0
@@ -115,6 +113,9 @@ def report(uses_tox, total, test_imports, tox_environments, tox_static_environme
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
+    if not total:
+        console.print("No repositories found.")
+        return
     console.print(
         f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox."
     )
