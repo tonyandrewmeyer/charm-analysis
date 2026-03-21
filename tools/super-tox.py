@@ -2,12 +2,12 @@
 
 """Utility to bulk run tox commands across charm repositories."""
 
+import ast
 import asyncio
 import contextlib
 import dataclasses
 import itertools
 import logging
-import os
 import pathlib
 import pprint
 import re
@@ -15,13 +15,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import typing
 from contextlib import nullcontext
 
 try:
     import tomllib  # type: ignore
 except ImportError:
     import tomli as tomllib  # type: ignore
-import typing
 
 import click
 import packaging.requirements
@@ -33,10 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class Settings:
     executable: str
-    mode: typing.Literal["local", "lxd", "lxd-per-tox"]
-    lxd_name: str
-    lxd_image_alias: str
-    keep_lxd_instance: bool
+    poetry_executable: str
     cache_folder: pathlib.Path
     ops_source: str
     ops_source_branch: typing.Optional[str]
@@ -47,6 +44,7 @@ class Settings:
     workers: int
     verbose: bool
     sample: int
+    filter_framework: typing.Optional[str]
 
 
 settings: Settings = None  # type: ignore
@@ -57,6 +55,7 @@ def _patch_requirements_file(requirements: pathlib.Path):
     content."""
     original = []
     adjusted = []
+    ops_extras: set[str] = set()
     with requirements.open() as req:
         for line in req:
             original.append(line)
@@ -97,10 +96,32 @@ def _patch_requirements_file(requirements: pathlib.Path):
                 continue
             if req.name != "ops":
                 adjusted.append(line)
+            else:
+                ops_extras.update(req.extras)
+    extras_str = f"[{','.join(sorted(ops_extras))}]" if ops_extras else ""
     if settings.ops_source_branch:
-        adjusted.append(f"\ngit+{settings.ops_source}@{settings.ops_source_branch}\n")
+        adjusted.append(f"\nops{extras_str} @ git+{settings.ops_source}@{settings.ops_source_branch}\n")
     else:
-        adjusted.append(f"\ngit+{settings.ops_source}\n")
+        adjusted.append(f"\nops{extras_str} @ git+{settings.ops_source}\n")
+    # When extras like "testing" or "tracing" are used, their corresponding
+    # packages must also come from the same git source (they live in
+    # subdirectories of the operator monorepo).
+    extra_packages = {
+        "testing": ("ops-scenario", "testing"),
+        "tracing": ("ops-tracing", "tracing"),
+    }
+    for extra_name, (pkg_name, subdir) in extra_packages.items():
+        if extra_name not in ops_extras:
+            continue
+        adjusted = [
+            line for line in adjusted
+            if not line.strip().startswith(pkg_name)
+            or line.strip().startswith(f"{pkg_name}-")
+        ]
+        if settings.ops_source_branch:
+            adjusted.append(f"\n{pkg_name} @ git+{settings.ops_source}@{settings.ops_source_branch}#subdirectory={subdir}\n")
+        else:
+            adjusted.append(f"\n{pkg_name} @ git+{settings.ops_source}#subdirectory={subdir}\n")
     with requirements.open("w") as req:
         req.write("\n".join(adjusted))
     return "".join(original)
@@ -119,9 +140,9 @@ def patch_ops(location: pathlib.Path):
         # environments, if one isn't), but this seems sufficient for now.
         extras = {}
         for fn in itertools.chain(
-            requirements.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
-            requirements.glob("*-requirements.txt"),  # e.g. test-requirements.txt
-            requirements.glob("requirements*.in"),
+            location.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
+            location.glob("*-requirements.txt"),  # e.g. test-requirements.txt
+            location.glob("requirements*.in"),
         ):
             extras[fn] = _patch_requirements_file(fn)
         try:
@@ -141,20 +162,215 @@ def patch_ops(location: pathlib.Path):
                 original_poetry_lock = data.read()
         else:
             original_poetry_lock = None
+        uv_lock = location / "uv.lock"
+        if uv_lock.exists():
+            with uv_lock.open() as data:
+                original_uv_lock = data.read()
+        else:
+            original_uv_lock = None
         with pyproject.open("rb") as data:
             adjusted = tomllib.load(data)
-        # TODO: Fix this so that something like ops-x" doesn't match.
-        adjusted["dependencies"] = [
-            req for req in adjusted.get("dependencies", ()) if not req.startswith("ops")
-        ]
+
+        # Build the replacement ops source line.
         if settings.ops_source_branch:
-            ops = f'{{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}'
+            ops_git_line = f"git+{settings.ops_source}@{settings.ops_source_branch}"
         else:
-            ops = f'{{ git = "{settings.ops_source}" }}'
-        adjusted["dependencies"].append(f"\nops = {ops}")
+            ops_git_line = f"git+{settings.ops_source}"
+
+        # Collect any extras specified for ops across all dependency groups.
+        ops_extras: set[str] = set()
+        for section_key in ("dependencies", "dev-dependencies"):
+            poetry_deps = adjusted.get("tool", {}).get("poetry", {}).get(section_key, {})
+            if "ops" in poetry_deps:
+                dep = poetry_deps["ops"]
+                if isinstance(dep, dict) and "extras" in dep:
+                    ops_extras.update(dep["extras"])
+        # Also check Poetry dependency groups (e.g. [tool.poetry.group.unit.dependencies]).
+        for group in adjusted.get("tool", {}).get("poetry", {}).get("group", {}).values():
+            group_deps = group.get("dependencies", {})
+            if "ops" in group_deps:
+                dep = group_deps["ops"]
+                if isinstance(dep, dict) and "extras" in dep:
+                    ops_extras.update(dep["extras"])
+        # Also check PEP 621 style dependencies.
+        for dep_str in adjusted.get("project", {}).get("dependencies", []):
+            try:
+                req = packaging.requirements.Requirement(dep_str)
+                if req.name == "ops":
+                    ops_extras.update(req.extras)
+            except packaging.requirements.InvalidRequirement:
+                pass
+        for opt_deps in adjusted.get("project", {}).get("optional-dependencies", {}).values():
+            for dep_str in opt_deps:
+                try:
+                    req = packaging.requirements.Requirement(dep_str)
+                    if req.name == "ops":
+                        ops_extras.update(req.extras)
+                except packaging.requirements.InvalidRequirement:
+                    pass
+
+        # Do string-based patching on the original content, since tomllib
+        # can only read (not write) TOML. We remove any line that looks
+        # like an ops dependency and append the git source.
+        patched_lines = []
+        for line in original.splitlines(keepends=True):
+            stripped = line.split("#", 1)[0].strip().strip('"').strip("'")
+            # Skip lines that are an ops dependency (but not ops-something).
+            if stripped == "ops" or stripped.startswith("ops ") or stripped.startswith("ops=") or stripped.startswith("ops>") or stripped.startswith("ops<") or stripped.startswith("ops~") or stripped.startswith("ops["):
+                continue
+            # Also skip poetry-style ops entries like 'ops = "^2.5"' or
+            # 'ops = {git = ...}'.
+            if re.match(r'^ops\s*=', stripped):
+                continue
+            patched_lines.append(line)
+        patched_content = "".join(patched_lines)
+
+        # For [project] style, inject into dependencies list; for poetry,
+        # inject into [tool.poetry.dependencies].
+        is_uv_project = uv_lock.exists() or "uv" in adjusted.get("tool", {})
+        if "project" in adjusted and "dependencies" in adjusted["project"]:
+            if is_uv_project:
+                # For uv-based projects, don't remove ops from dependencies.
+                # Instead, use [tool.uv.sources] to override where ops comes
+                # from, and re-add the ops lines we stripped earlier.
+                patched_content = original  # start fresh, keeping all deps
+                # Build source override entries for ops and companion packages.
+                if settings.ops_source_branch:
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}']
+                else:
+                    source_lines = [f'ops = {{ git = "{settings.ops_source}" }}']
+                # When extras like "testing" or "tracing" are used, their
+                # companion packages must also come from the monorepo source.
+                extra_packages = {
+                    "testing": ("ops-scenario", "testing"),
+                    "tracing": ("ops-tracing", "tracing"),
+                }
+                companion_deps = []
+                for extra_name, (pkg_name, subdir) in extra_packages.items():
+                    if extra_name not in ops_extras:
+                        continue
+                    if settings.ops_source_branch:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}", subdirectory = "{subdir}" }}')
+                    else:
+                        source_lines.append(f'{pkg_name} = {{ git = "{settings.ops_source}", subdirectory = "{subdir}" }}')
+                    companion_deps.append(pkg_name)
+                # Merge into existing [tool.uv.sources] if present, else add new.
+                source_entries = "\n".join(source_lines)
+                if "[tool.uv.sources]" in patched_content:
+                    patched_content = patched_content.replace(
+                        "[tool.uv.sources]",
+                        f"[tool.uv.sources]\n{source_entries}",
+                    )
+                else:
+                    patched_content += f"\n[tool.uv.sources]\n{source_entries}\n"
+                # Add companion packages as direct dependencies so uv accepts
+                # the URL source override for transitive deps.
+                if companion_deps:
+                    dep_entries = ", ".join(f'"{d}"' for d in companion_deps)
+                    patched_content = patched_content.replace(
+                        "dependencies = [",
+                        f"dependencies = [\n  {dep_entries},",
+                    )
+                # Also bump requires-python to >=3.10 if it's lower, since
+                # ops HEAD requires it and uv validates across all declared
+                # Python versions.
+                patched_content = re.sub(
+                    r'requires-python\s*=\s*"[~>]=3\.[89](\.\d+)?"',
+                    'requires-python = ">=3.10"',
+                    patched_content,
+                )
+            else:
+                # Non-uv PEP 621 style: inject ops back into the dependencies list.
+                extras_str = f"[{','.join(sorted(ops_extras))}]" if ops_extras else ""
+                ops_pep508 = f"ops{extras_str} @ {ops_git_line}"
+                # Insert the ops dependency line into the [project] dependencies array.
+                patched_content = patched_content.replace(
+                    "dependencies = [",
+                    f'dependencies = [\n  "{ops_pep508}",',
+                )
+        elif "tool" in adjusted and "poetry" in adjusted["tool"]:
+            # Poetry style: add ops as a git dependency, preserving extras.
+            extras_list = f', extras = [{", ".join(repr(e) for e in sorted(ops_extras))}]' if ops_extras else ""
+            if settings.ops_source_branch:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}"{extras_list}}}\n'
+            else:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}"{extras_list}}}\n'
+            # When extras like "testing" or "tracing" are used, their
+            # corresponding packages (ops-scenario, ops-tracing) must also
+            # come from the same git source. They live in subdirectories of
+            # the operator monorepo and their dev versions aren't on PyPI.
+            extra_packages = {
+                "testing": ("ops-scenario", "testing"),
+                "tracing": ("ops-tracing", "tracing"),
+            }
+            for extra_name, (pkg_name, subdir) in extra_packages.items():
+                if extra_name not in ops_extras:
+                    continue
+                # Remove any existing dependency lines for this package.
+                new_lines = []
+                for line in patched_content.splitlines(keepends=True):
+                    stripped = line.split("#", 1)[0].strip().strip('"').strip("'")
+                    if stripped.startswith(f"{pkg_name} ") or stripped.startswith(f"{pkg_name}=") or stripped == pkg_name:
+                        continue
+                    if re.match(rf'^{re.escape(pkg_name)}\s*=', stripped):
+                        continue
+                    new_lines.append(line)
+                patched_content = "".join(new_lines)
+                if settings.ops_source_branch:
+                    extra_toml = f'\n{pkg_name} = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}", subdirectory = "{subdir}"}}\n'
+                else:
+                    extra_toml = f'\n{pkg_name} = {{git = "{settings.ops_source}", subdirectory = "{subdir}"}}\n'
+                ops_toml += extra_toml
+            # Insert after [tool.poetry.dependencies] header.
+            patched_content = patched_content.replace(
+                "[tool.poetry.dependencies]",
+                f"[tool.poetry.dependencies]{ops_toml}",
+            )
+
+        with pyproject.open("w") as f:
+            f.write(patched_content)
+
         # Some charms require running poetry lock after this change.
         if "poetry" in adjusted.get("tool", {}):
-            subprocess.run(["poetry", "lock"], cwd=location, stdout=subprocess.PIPE)
+            try:
+                result = subprocess.run(
+                    [*shlex.split(settings.poetry_executable), "lock"],
+                    cwd=location,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "poetry lock failed for %s: %s",
+                        location,
+                        result.stderr.decode().strip(),
+                    )
+                    # If poetry lock fails (e.g. due to unresolvable dev
+                    # dependencies), remove the lock file so that
+                    # `poetry install` doesn't refuse to run.
+                    if poetry_lock.exists():
+                        poetry_lock.unlink()
+            except FileNotFoundError:
+                logger.warning("poetry not found, skipping poetry lock for %s", location)
+        # Similarly, uv-based projects need their lock file updated.
+        if uv_lock.exists():
+            try:
+                result = subprocess.run(
+                    ["uv", "lock"],
+                    cwd=location,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "uv lock failed for %s: %s",
+                        location,
+                        result.stderr.decode().strip(),
+                    )
+            except FileNotFoundError:
+                logger.warning("uv not found, skipping uv lock for %s", location)
         try:
             yield pyproject
         finally:
@@ -163,10 +379,165 @@ def patch_ops(location: pathlib.Path):
             if original_poetry_lock is not None:
                 with poetry_lock.open("w") as lock:
                     lock.write(original_poetry_lock)
+            elif poetry_lock.exists():
+                poetry_lock.unlink()
+            if original_uv_lock is not None:
+                with uv_lock.open("w") as lock:
+                    lock.write(original_uv_lock)
+            elif uv_lock.exists():
+                uv_lock.unlink()
     else:
         raise NotImplementedError(
             f"Only know how to patch requirements.txt and pyproject.toml (in {location})"
         )
+
+
+# Imports that indicate use of a given testing framework.
+# For simple cases, any import of the module name is sufficient.
+FRAMEWORK_IMPORTS = {
+    "scenario": {"scenario"},
+    "jubilant": {"jubilant"},
+}
+
+# Names imported from ops.testing that indicate Scenario usage (as opposed to
+# the old Harness framework, which is also in ops.testing).
+SCENARIO_OPS_TESTING_NAMES = {
+    "Context", "State", "Mount", "Relation",
+    "CloudSpec", "Secret", "PeerRelation", "SubordinateRelation",
+}
+
+# Package names in requirements files that indicate a framework dependency.
+# ops[testing] is handled separately by checking extras on the "ops" package.
+FRAMEWORK_DEPS = {
+    "scenario": {"ops-scenario"},
+    "jubilant": {"jubilant"},
+}
+
+
+def _iter_test_python_files(base: pathlib.Path):
+    """Iterate through all .py files in a tests directory."""
+    if not base.exists():
+        return
+    for node in base.iterdir():
+        if node.name.startswith("."):
+            continue
+        if node.is_dir():
+            yield from _iter_test_python_files(node)
+        elif node.name.endswith(".py"):
+            yield node
+
+
+def _has_framework_import(location: pathlib.Path, framework: str) -> bool:
+    """Check if test files in the charm import the specified framework.
+
+    For most frameworks, a simple module-name match is enough. For Scenario,
+    we also need to distinguish ``from ops.testing import Context`` (Scenario)
+    from ``from ops.testing import Harness`` (old Harness framework).
+    """
+    simple_modules = FRAMEWORK_IMPORTS.get(framework, set())
+    for py_file in _iter_test_python_files(location / "tests"):
+        try:
+            with py_file.open() as raw:
+                tree = ast.parse(raw.read())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in simple_modules:
+                        return True
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if node.module in simple_modules:
+                    return True
+                # Check for Scenario-specific names imported from ops.testing.
+                if framework == "scenario" and node.module == "ops.testing":
+                    for alias in node.names:
+                        if alias.name in SCENARIO_OPS_TESTING_NAMES:
+                            return True
+    return False
+
+
+def _req_matches_framework(
+    req: packaging.requirements.Requirement, framework: str, dep_names: set
+) -> bool:
+    """Check if a parsed requirement matches the specified framework."""
+    if req.name in dep_names:
+        return True
+    # ops[testing] provides Scenario.
+    if framework == "scenario" and req.name == "ops" and "testing" in req.extras:
+        return True
+    return False
+
+
+def _has_framework_dep_in_requirements(req_path: pathlib.Path, framework: str) -> bool:
+    """Check if a requirements file contains the specified framework as a dependency."""
+    dep_names = FRAMEWORK_DEPS.get(framework, set())
+    if not req_path.exists():
+        return False
+    with req_path.open() as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line or line.startswith("-") or line.startswith("git+"):
+                continue
+            try:
+                req = packaging.requirements.Requirement(line)
+            except packaging.requirements.InvalidRequirement:
+                continue
+            if _req_matches_framework(req, framework, dep_names):
+                return True
+    return False
+
+
+def _has_framework_dep_in_pyproject(pyproject_path: pathlib.Path, framework: str) -> bool:
+    """Check if pyproject.toml contains the specified framework as a dependency."""
+    dep_names = FRAMEWORK_DEPS.get(framework, set())
+    if not pyproject_path.exists():
+        return False
+    with pyproject_path.open("rb") as f:
+        try:
+            data = tomllib.load(f)
+        except Exception:
+            return False
+    # Check all dependency lists: top-level, project, project.optional-dependencies,
+    # and poetry groups.
+    all_dep_strings = list(data.get("dependencies", []))
+    all_dep_strings.extend(data.get("project", {}).get("dependencies", []))
+    for section_deps in data.get("project", {}).get("optional-dependencies", {}).values():
+        all_dep_strings.extend(section_deps)
+    # Poetry dependencies.
+    poetry = data.get("tool", {}).get("poetry", {})
+    all_dep_strings.extend(poetry.get("dependencies", {}).keys())
+    for group in poetry.get("group", {}).values():
+        all_dep_strings.extend(group.get("dependencies", {}).keys())
+
+    for dep_str in all_dep_strings:
+        try:
+            req = packaging.requirements.Requirement(dep_str)
+        except packaging.requirements.InvalidRequirement:
+            continue
+        if _req_matches_framework(req, framework, dep_names):
+            return True
+    return False
+
+
+def uses_framework(location: pathlib.Path, framework: str) -> bool:
+    """Check if a charm uses the specified testing framework.
+
+    Checks dependencies in requirements files first (cheaper), then falls back
+    to AST-based import scanning of test files.
+    """
+    # Check all requirements*.txt and *-requirements.txt files.
+    req_files = set(itertools.chain(
+        location.glob("requirements*.txt"),
+        location.glob("*-requirements.txt"),
+    ))
+    for req_file in req_files:
+        if _has_framework_dep_in_requirements(req_file, framework):
+            return True
+    if _has_framework_dep_in_pyproject(location / "pyproject.toml", framework):
+        return True
+    # Fall back to more expensive AST-based import scanning.
+    return _has_framework_import(location, framework)
 
 
 async def run_tox(
@@ -181,23 +552,14 @@ async def run_tox(
     if environment:
         args.extend(["-e", environment])
 
-    if settings.mode == "local":
-        tox = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=location.resolve(),
-        )
-        stdout, stderr = await tox.communicate()
-        returncode = tox.returncode
-    else:
-        # TODO: Handle: config, cache folder, ops patching (higher than this!), fresh tox, lxd name, image alias, keeping instance
-        # Provide a partial to the method.
-        with lxd_instance(
-            f"{settings.lxd_name}-{location.name}",
-            delete_on_exit=not settings.keep_lxd_instance,
-        ) as lxd:
-            returncode, stdout, stderr = lxd.execute(args)
+    tox = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=location.resolve(),
+    )
+    stdout, stderr = await tox.communicate()
+    returncode = tox.returncode
     if returncode != 0:
         if stdout.strip():
             # This is potentially useful, but it's so verbose that it just
@@ -205,20 +567,24 @@ async def run_tox(
             # repo to get the output.
             # TODO: There must be a better solution here, like sending it to
             # somewhere it can be accessed in a handy format?
-            # logger.info("tox failed:%s in %s: %r", environment, location, stdout)
             pass
         if stderr.strip():
             logger.error("Errors from tox:%s in %s: %r", environment, location, stderr)
     # TODO: Should do more than this - does everything have a coverage report?
     # Can we get totals reliably?
-    passed = returncode == 0
-    if passed:
+    if returncode == 0:
         logger.info("%s: passed", location)
+        results.append({"passed": True, "location": location})
     elif returncode == 254:
-        logger.info("No %s environment found in %s", environment, location)
+        logger.info("Skipping %s - no '%s' tox environment", location, environment)
+        results.append({
+            "skipped": "no_environment",
+            "location": location,
+            "reason": f"no '{environment}' tox environment",
+        })
     else:
         logger.warning("%s did not pass", location)
-    results.append({"passed": passed, "location": location})
+        results.append({"passed": False, "location": location})
 
 
 async def super_tox(conf, environment: str):
@@ -227,10 +593,12 @@ async def super_tox(conf, environment: str):
     queue = asyncio.Queue()
     end = settings.sample or sys.maxsize
     for repo in itertools.islice(settings.cache_folder.iterdir(), 0, end):
+        if not repo.is_dir():
+            continue
         if not re.match(settings.repo_re, repo.name, re.IGNORECASE):
             logger.info("Skipping %s - doesn't match specified pattern", repo)
             continue
-        if not (repo / "tox.ini").exists():
+        if not (repo / "tox.ini").exists() and not (repo / "pyproject.toml").exists():
             continue
         if settings.fresh_tox:
             tox_cache = repo / ".tox"
@@ -275,36 +643,55 @@ async def super_tox(conf, environment: str):
     for task in tasks:
         task.cancel()
 
-    await asyncio.gather(*tasks)
-    results.sort(key=lambda d: d["location"])
-    success_count = 0
+    await asyncio.gather(*tasks, return_exceptions=True)
+    results.sort(key=lambda d: str(d.get("location", "")))
 
-    for result in results:
-        try:
-            if not result["passed"]:
-                continue
-        # FIXME these exceptions never happen...
-        except (TypeError, asyncio.CancelledError) as e:
-            logger.error("Task was cancelled: %s", e, exc_info=True)
-            continue
-        except Exception as e:
-            logger.error("Unable to process result: %s", e, exc_info=True)
-            continue
-        success_count += 1
-    pct = 100 * success_count // len(results)
-    print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
+    passed = [r for r in results if isinstance(r, dict) and r.get("passed") is True]
+    failed = [r for r in results if isinstance(r, dict) and r.get("passed") is False]
+    skipped = [r for r in results if isinstance(r, dict) and "skipped" in r]
+    ran = [r for r in results if isinstance(r, dict) and "passed" in r]
+
+    if ran:
+        pct = 100 * len(passed) // len(ran)
+        print(f"{len(passed)} out of {len(ran)} ({pct}%) runs passed.")
+    else:
+        print("No tests were run.")
+
+    if skipped:
+        skip_reasons = {}
+        for r in skipped:
+            skip_type = r["skipped"]
+            skip_reasons.setdefault(skip_type, []).append(r)
+        parts = []
+        if "no_framework" in skip_reasons:
+            fw = settings.filter_framework
+            parts.append(f"{len(skip_reasons['no_framework'])} had no {fw} tests")
+        if "no_environment" in skip_reasons:
+            parts.append(
+                f"{len(skip_reasons['no_environment'])} had no '{environment}' tox environment"
+            )
+        if "ignored" in skip_reasons:
+            parts.append(f"{len(skip_reasons['ignored'])} in ignore list")
+        print(f"Skipped {len(skipped)} charms ({', '.join(parts)}).")
+
     if settings.verbose:
-        print("Failed for these repos:")
-        pprint.pprint([
-            str(d["location"].relative_to(settings.cache_folder))
-            for d in results
-            if not d["passed"]
-        ])
+        if failed:
+            print("Failed:")
+            pprint.pprint([
+                str(d["location"].relative_to(settings.cache_folder))
+                for d in failed
+            ])
+        if skipped:
+            print("Skipped:")
+            for r in skipped:
+                loc = str(r["location"].relative_to(settings.cache_folder))
+                print(f"  {loc}: {r.get('reason', r['skipped'])}")
 
 
 async def worker(name, queue, conf):
     logger.info("Starting worker: %s", name)
     ignore = conf.get("ignore", {})
+    all_ignored = set(itertools.chain.from_iterable(ignore.values()))
     while True:
         try:
             repo, environment, results = await queue.get()
@@ -312,25 +699,15 @@ async def worker(name, queue, conf):
             # We don't need to do anything any more.
             break
         location = str(repo.relative_to(settings.cache_folder))
-        if location in ignore.get("expensive", ()):
-            logger.info("Skipping %r - too expensive", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("manual", ()):
-            logger.info("Skipping %r - requires manual intervention", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("requirements", ()):
-            logger.info("Skipping %r - cannot install dependencies", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("not_ops", ()):
-            logger.info("Skipping %r - does not use ops", location)
-            queue.task_done()
-            continue
-        elif location in ignore.get("misc", ()):
-            logger.info("Skipping %r - in misc ignore list", location)
-            queue.task_done()
+        ignored = False
+        for category, reason in IGNORE_REASONS.items():
+            if location in ignore.get(category, ()):
+                logger.info("Skipping %r - %s", location, reason)
+                results.append({"skipped": "ignored", "location": repo, "reason": reason})
+                queue.task_done()
+                ignored = True
+                break
+        if ignored:
             continue
 
         if (
@@ -351,92 +728,29 @@ async def worker(name, queue, conf):
             if repo.name == "catalogue-k8s-operator":
                 repo = repo / "charm"
             location = str(repo.relative_to(settings.cache_folder))
-            if location in sum(ignore.values(), []):
-                logger.info("Skipping %r", location)
+            if location in all_ignored:
+                logger.info("Skipping %r - in ignore list", location)
+                results.append({"skipped": "ignored", "location": repo, "reason": "in ignore list"})
                 continue
-            if settings.mode == "local":
-                try:
-                    with patch_ops(repo) if settings.ops_source else nullcontext():
-                        await run_tox(settings.executable, repo, environment, results)
-                except Exception as e:
-                    logger.error("Failed running tox: %s", e, exc_info=True)
+            if settings.filter_framework:
+                if not uses_framework(repo, settings.filter_framework):
+                    logger.info(
+                        "Skipping %s - does not use %s",
+                        location,
+                        settings.filter_framework,
+                    )
+                    results.append({
+                        "skipped": "no_framework",
+                        "location": repo,
+                        "reason": f"does not use {settings.filter_framework}",
+                    })
+                    continue
+            try:
+                with patch_ops(repo) if settings.ops_source else nullcontext():
+                    await run_tox(settings.executable, repo, environment, results)
+            except Exception as e:
+                logger.error("Failed running tox: %s", e, exc_info=True)
         queue.task_done()
-
-
-def get_lxd_instance(name: str, image_alias: str, create: bool = False):
-    """Get a local lxd instance by the specified name.
-
-    If create is True, then if there is no matching instance, then create one
-    using the provided image alias."""
-    import pylxd  # type: ignore
-
-    client = pylxd.Client()
-    try:
-        return client.instances.get(name)
-    except pylxd.exceptions.NotFound:
-        if not create:
-            raise
-    logger.info("Creating LXD instance %s (%s)", name, image_alias)
-    config = {"name": name, "source": {"type": "image", "alias": image_alias}}
-    return client.instances.create(config, wait=True)
-
-
-def lxd_exists(instance, filename: str) -> bool:
-    """Return true iff the filename exists on the instance."""
-    return instance.execute(["stat", filename]).exit_code == 0
-
-
-def sync_to_lxd(instance, source: pathlib.Path, destination: str):
-    """Recursively copy the source to the destination inside of the instance."""
-    # TODO: This assumes that there aren't edges cases like the path exists
-    # in the instance, but it's a file there and a directory locally.
-    for item in source.iterdir():
-        item_destination = os.path.join(destination, item.name)
-        if not lxd_exists(instance, str(item)):
-            # We can just copy it.
-            instance.files.recursive_put(str(item), item_destination)
-        elif item.is_file():
-            # If it's a file, we can just replace it.
-            instance.files.delete(item_destination)
-            instance.files.put(str(item), item_destination)
-        else:
-            sync_to_lxd(instance, item, item_destination)
-
-
-@contextlib.contextmanager
-def lxd_instance(name: str, *, delete_on_exit: bool = True):
-    instance = get_lxd_instance(name, settings.lxd_image_alias, create=True)
-    try:
-        if instance.status != "Running":
-            logger.info("Starting lxd instance %s", instance.name)
-            instance.start()
-        # TODO: Ideally, the two copies would really be syncs, to speed things
-        # up when the instance already exists, but without missing any changes
-        # since the initial copy.
-        logger.info("Copying charm-analysis to the instance")
-        me = pathlib.Path(__file__).parent.parent
-        sync_to_lxd(instance, me, "charm-analysis")
-        # Copy the cache to the instance.
-        if not settings.cache_folder.is_relative_to(me):
-            logger.info("Copying cache to the instance")
-            sync_to_lxd(instance, settings.cache_folder, "charm-analysis/.cache")
-        yield instance
-    finally:
-        if instance.status == "Running":
-            logger.info("Stopping lxd instance %s", instance.name)
-            instance.stop()
-        logger.info("Instance status: %s", instance.status)
-        if delete_on_exit:
-            logger.info("Deleting lxd instance %s", instance.name)
-            instance.delete()
-
-
-def fixme(f):
-    def inner(*args, **kwargs):
-        print(args, kwargs)
-        return f(*args, **kwargs)
-
-    return inner
 
 
 @click.option("--workers", default=1, type=click.IntRange(1))
@@ -456,27 +770,27 @@ def fixme(f):
         ["debug", "info", "warning", "error", "critical"], case_sensitive=False
     ),
 )
-@click.option(
-    "--mode",
-    default="local",
-    type=click.Choice(["local", "lxd", "lxd-per-tox"], case_sensitive=False),
-)
-@click.option("--lxd-name", default="super-tox")
-@click.option("--lxd-image-alias", default="ubuntu-22.04")
-@click.option("--keep-lxd-instance/--no-keep-lxd-instance", default=False)
 @click.option("--git-pull/--no-git-pull", default=False)
 @click.option("--remove-local-changes/--no-remove-local-changes", default=False)
 @click.option("--repo", default=".*")
 @click.option("--fresh-tox/--no-fresh-tox", default=False)
 @click.option("-e", default=None, type=click.STRING)
+@click.option(
+    "--filter",
+    "filter_framework",
+    default=None,
+    type=click.Choice(["scenario", "jubilant"], case_sensitive=False),
+    help="only run for charms that use this testing framework",
+)
 @click.option("--verbose/--no-verbose", default=False, help="additional output")
 @click.option("--sample", default=0, help="try to run only this many repositories")
 @click.option("--executable", default="tox")
+@click.option("--poetry-executable", default="poetry")
 @click.command()
 def main(
     cache_folder: str,
     e: str,
-    log_level: str,
+    log_level: typing.Literal["debug", "info", "warning", "error", "critical"],
     repo: str,
     config: pathlib.Path,
     **kwargs,
@@ -497,39 +811,10 @@ def main(
     global settings
     settings = Settings(**kwargs, cache_folder=pathlib.Path(cache_folder), repo_re=repo)
 
-    if settings.mode in ("local", "lxd-per-tox"):
-        with config.open("rb") as raw:
-            conf = tomllib.load(raw)
+    with config.open("rb") as raw:
+        conf = tomllib.load(raw)
 
-        asyncio.run(super_tox(conf, e))
-    elif settings.mode == "lxd":
-        cmd = [
-            "/charm-analysis/super-tox.py",
-            f"--config={config}",
-            f"--cache-folder={settings.cache_folder}",  # TODO: This needs to adjust in some cases.
-            "-e",
-            e,
-            f"--workers={settings.workers}",
-            f"--ops-source={settings.ops_source}",
-            f"repo={settings.repo_re}",
-            f"--log-level={log_level}",
-        ]
-        if settings.ops_source_branch:
-            cmd.append(f"--ops-source-branch={settings.ops_source_branch}")
-        if settings.fresh_tox:
-            cmd.append("--fresh-tox")
-        if settings.remove_local_changes:
-            cmd.append("--remove-local-changes")
-        if settings.git_pull:
-            cmd.append("--git-pull")
-        with lxd_instance(
-            settings.lxd_name,
-            delete_on_exit=not settings.keep_lxd_instance,
-        ) as lxd:
-            exit_code, stdout, stderr = lxd.execute(cmd)
-        print(stdout, file=sys.stdout)
-        print(stderr, file=sys.stderr)
-        sys.exit(exit_code)
+    asyncio.run(super_tox(conf, e))
 
 
 if __name__ == "__main__":

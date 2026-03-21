@@ -9,8 +9,9 @@ import pathlib
 
 import click
 import httpx
-import rich.logging
+import rich.console
 import yaml
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
 
@@ -58,20 +59,11 @@ def charm_details(name):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the charm artifacts."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     all_frameworks = collections.Counter()
     all_languages = collections.Counter()
-    # all_tracks = collections.Counter()
-    # all_channels = collections.Counter()
-    # all_revisions = collections.Counter()
     min_ages = collections.Counter()
     max_ages = collections.Counter()
     # TODO: figure out what to do with bundles - should I iterate through
@@ -94,7 +86,9 @@ def main(cache_folder):
             continue
         # TODO: This could be async, since it's doing a bunch of network requests.
         try:
-            frameworks, languages, tracks, channels, revisions, ages = charm_details(name)
+            frameworks, languages, tracks, channels, revisions, ages = charm_details(
+                name
+            )
         except httpx.HTTPStatusError as e:
             logger.warning("Unable to get store info for %s: %s", entry, e)
             continue
@@ -125,16 +119,22 @@ def report(total, frameworks, languages, min_ages, max_ages):
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table("Languages", "Language", total, sorted(languages.items()))
+    table = count_and_percentage_table(
+        "Languages", "Language", total, sorted(languages.items())
+    )
     console.print(table)
     console.print()
 
     # TODO: probably this and the next one should be bucketed?
-    table = count_and_percentage_table("Newest Artifact", "Days", total, sorted(min_ages.items()))
+    table = count_and_percentage_table(
+        "Newest Artifact", "Days", total, sorted(min_ages.items())
+    )
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table("Oldest Artifact", "Days", total, sorted(max_ages.items()))
+    table = count_and_percentage_table(
+        "Oldest Artifact", "Days", total, sorted(max_ages.items())
+    )
     console.print(table)
     console.print()
 

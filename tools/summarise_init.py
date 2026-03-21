@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 
 """Summarise what charms do in __init__ (directly or indirectly)."""
 
@@ -10,7 +10,8 @@ import operator
 import pathlib
 
 import click
-import rich.logging
+import rich.console
+from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_entries
 
@@ -19,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 def _get_root_tree(path):
     with path.open() as file:
-        return ast.parse(file.read(), path.name)
+        try:
+            return ast.parse(file.read(), path.name)
+        except SyntaxError:
+            logger.warning("Failed to parse %s", path)
+            return None
 
 
 def _find_charm_ast(tree):
@@ -126,16 +131,16 @@ class OperationCounter(ast.NodeVisitor):
             else:
                 self._count_assign(target)
 
-    def visitAnnAssign(self, node: ast.AnnAssign):
+    def visit_AnnAssign(self, node: ast.AnnAssign):
         self._count_assign(node.target)
 
-    def visitRaise(self, node: ast.Raise):
+    def visit_Raise(self, node: ast.Raise):
         self.raises[node.exc] += 1
 
     def visit_Assert(self, node: ast.Assert):
         self.asserts[node.test] += 1
 
-    def visitReturn(self, node: ast.Return):
+    def visit_Return(self, node: ast.Return):
         self.explicit_return[node.value] += 1
 
 
@@ -147,6 +152,8 @@ def walk_init(path):
     function that's called.
     """
     tree = _get_root_tree(path)
+    if tree is None:
+        return None
     charm = _find_charm_ast(tree)
     if not charm:
         logger.warning("Could not find a CharmBase subclass in %s", path)
@@ -154,6 +161,7 @@ def walk_init(path):
     init = _find_func_by_name(charm, "__init__")
     if not init:
         logger.warning("Could not find __init__ in %s, %s", path, charm)
+        return None
     counter = OperationCounter(charm)
     counter.visit(init)
     return counter
@@ -163,13 +171,7 @@ def walk_init(path):
 @click.command()
 def main(cache_folder):
     """Output simple statistics about the charm's __init__ code."""
-    FORMAT = "%(message)s"
-    logging.basicConfig(
-        level=logging.INFO,
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[rich.logging.RichHandler()],
-    )
+    configure_logging()
 
     total = 0
     calls = collections.Counter()
