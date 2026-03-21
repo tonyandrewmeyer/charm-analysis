@@ -94,7 +94,9 @@ def main(cache_folder):
             continue
         # TODO: This could be async, since it's doing a bunch of network requests.
         try:
-            frameworks, languages, tracks, channels, revisions, ages = charm_details(name)
+            frameworks, languages, tracks, channels, revisions, ages = charm_details(
+                name
+            )
         except httpx.HTTPStatusError as e:
             logger.warning("Unable to get store info for %s: %s", entry, e)
             continue
@@ -125,16 +127,22 @@ def report(total, frameworks, languages, min_ages, max_ages):
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table("Languages", "Language", total, sorted(languages.items()))
+    table = count_and_percentage_table(
+        "Languages", "Language", total, sorted(languages.items())
+    )
     console.print(table)
     console.print()
 
     # TODO: probably this and the next one should be bucketed?
-    table = count_and_percentage_table("Newest Artifact", "Days", total, sorted(min_ages.items()))
+    table = count_and_percentage_table(
+        "Newest Artifact", "Days", total, sorted(min_ages.items())
+    )
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table("Oldest Artifact", "Days", total, sorted(max_ages.items()))
+    table = count_and_percentage_table(
+        "Oldest Artifact", "Days", total, sorted(max_ages.items())
+    )
     console.print(table)
     console.print()
 

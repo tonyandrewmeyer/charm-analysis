@@ -54,6 +54,7 @@ async def clone(dest_folder: pathlib.Path, name: str, repository: str, branch: s
     clone = await asyncio.create_subprocess_exec(
         *args,
         repository,
+        str(dest_folder.resolve()),
         cwd=dest_folder.parent,
     )
     await clone.wait()
@@ -72,7 +73,7 @@ async def pull(dest_folder: pathlib.Path, name: str):
         logger.warning("Could not pull %s", name)
 
 
-async def process_input(input: csv.DictReader, cache_folder: pathlib.Path):
+async def process_input(input: csv.DictReader, cache_folder: pathlib.Path, use_ssh: bool):
     """Clone or pull the repositories in the input CSV."""
     async with asyncio.TaskGroup() as tg:
         for row in input:
@@ -81,8 +82,9 @@ async def process_input(input: csv.DictReader, cache_folder: pathlib.Path):
             name = row["Charm Name"]
             repository = row["Repository"]
             branch = row.get("Branch (if not the default)")
-            # Convert from HTTP to git@ to more easily get private repositories.
-            repository = repository.replace("https://github.com/", "git@github.com:")
+            repository = repository.rstrip("/")
+            if use_ssh:
+                repository = repository.replace("https://github.com/", "git@github.com:")
             base_name = repository.rstrip("/").rsplit("/", 1)[1]
             if branch:
                 repo_folder = cache_folder / f"{base_name}-{branch}"
@@ -100,9 +102,10 @@ async def process_input(input: csv.DictReader, cache_folder: pathlib.Path):
 
 
 @click.option("--cache-folder", default=".cache")
+@click.option("--ssh/--https", "use_ssh", default=False, help="Use SSH (git@) instead of HTTPS for GitHub URLs.")
 @click.argument("charm-list", type=click.File("rt"))
 @click.command()
-def main(cache_folder: str, charm_list: typing.TextIO):
+def main(cache_folder: str, use_ssh: bool, charm_list: typing.TextIO):
     """Ensure updated repositories for all the charms from the provided list.
 
     If a repository does not exist, clone it, otherwise do a pull. Assumes that
@@ -122,7 +125,7 @@ def main(cache_folder: str, charm_list: typing.TextIO):
 
     os.makedirs(cache_folder, exist_ok=True)
     input = csv.DictReader(charm_list)
-    asyncio.run(process_input(input, pathlib.Path(cache_folder)))
+    asyncio.run(process_input(input, pathlib.Path(cache_folder), use_ssh))
 
 
 if __name__ == "__main__":

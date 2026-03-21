@@ -15,13 +15,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import typing
 from contextlib import nullcontext
 
 try:
     import tomllib  # type: ignore
 except ImportError:
     import tomli as tomllib  # type: ignore
-import typing
 
 import click
 import packaging.requirements
@@ -120,9 +120,9 @@ def patch_ops(location: pathlib.Path):
         # environments, if one isn't), but this seems sufficient for now.
         extras = {}
         for fn in itertools.chain(
-            requirements.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
-            requirements.glob("*-requirements.txt"),  # e.g. test-requirements.txt
-            requirements.glob("requirements*.in"),
+            requirements.parent.glob("requirements-*.txt"),  # e.g. requirements-unit.txt
+            requirements.parent.glob("*-requirements.txt"),  # e.g. test-requirements.txt
+            requirements.parent.glob("requirements*.in"),
         ):
             extras[fn] = _patch_requirements_file(fn)
         try:
@@ -144,18 +144,72 @@ def patch_ops(location: pathlib.Path):
             original_poetry_lock = None
         with pyproject.open("rb") as data:
             adjusted = tomllib.load(data)
-        # TODO: Fix this so that something like ops-x" doesn't match.
-        adjusted["dependencies"] = [
-            req for req in adjusted.get("dependencies", ()) if not req.startswith("ops")
-        ]
+
+        # Build the replacement ops source line.
         if settings.ops_source_branch:
-            ops = f'{{ git = "{settings.ops_source}", branch = "{settings.ops_source_branch}" }}'
+            ops_git_line = f"git+{settings.ops_source}@{settings.ops_source_branch}"
         else:
-            ops = f'{{ git = "{settings.ops_source}" }}'
-        adjusted["dependencies"].append(f"\nops = {ops}")
+            ops_git_line = f"git+{settings.ops_source}"
+
+        # Do string-based patching on the original content, since tomllib
+        # can only read (not write) TOML. We remove any line that looks
+        # like an ops dependency and append the git source.
+        patched_lines = []
+        for line in original.splitlines(keepends=True):
+            stripped = line.split("#", 1)[0].strip().strip('"').strip("'")
+            # Skip lines that are an ops dependency (but not ops-something).
+            if stripped == "ops" or stripped.startswith("ops ") or stripped.startswith("ops=") or stripped.startswith("ops>") or stripped.startswith("ops<") or stripped.startswith("ops~") or stripped.startswith("ops["):
+                continue
+            # Also skip poetry-style ops entries like 'ops = "^2.5"' or
+            # 'ops = {git = ...}'.
+            if re.match(r'^ops\s*=', stripped):
+                continue
+            patched_lines.append(line)
+        patched_content = "".join(patched_lines)
+
+        # For [project] style, inject into dependencies list; for poetry,
+        # inject into [tool.poetry.dependencies].
+        if "project" in adjusted and "dependencies" in adjusted["project"]:
+            # PEP 621 style: add ops as a PEP 508 string in the dependencies list.
+            patched_content = patched_content.replace(
+                "[project]",
+                "[project]",  # keep the header
+            )
+            # Append a requirements.txt alongside for the ops override.
+            # The simplest reliable approach: create a temporary requirements
+            # file that will be picked up by the build.
+            ops_req = location / "requirements.txt"
+            if not ops_req.exists():
+                ops_req.write_text(f"{ops_git_line}\n")
+                # Track that we created it so we can clean up.
+                patched_content = patched_content  # no-op, cleanup below
+        elif "tool" in adjusted and "poetry" in adjusted["tool"]:
+            # Poetry style: add ops as a git dependency.
+            if settings.ops_source_branch:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}", branch = "{settings.ops_source_branch}"}}\n'
+            else:
+                ops_toml = f'\nops = {{git = "{settings.ops_source}"}}\n'
+            # Insert after [tool.poetry.dependencies] header.
+            patched_content = patched_content.replace(
+                "[tool.poetry.dependencies]",
+                f"[tool.poetry.dependencies]{ops_toml}",
+            )
+
+        with pyproject.open("w") as f:
+            f.write(patched_content)
+
         # Some charms require running poetry lock after this change.
         if "poetry" in adjusted.get("tool", {}):
-            subprocess.run([*shlex.split(settings.poetry_executable), "lock"], cwd=location, stdout=subprocess.PIPE)
+            try:
+                subprocess.run(
+                    [*shlex.split(settings.poetry_executable), "lock"],
+                    cwd=location,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+            except FileNotFoundError:
+                logger.warning("poetry not found, skipping poetry lock for %s", location)
         try:
             yield pyproject
         finally:
@@ -164,6 +218,12 @@ def patch_ops(location: pathlib.Path):
             if original_poetry_lock is not None:
                 with poetry_lock.open("w") as lock:
                     lock.write(original_poetry_lock)
+            # Clean up temporary requirements.txt if we created one.
+            temp_req = location / "requirements.txt"
+            if temp_req.exists() and "project" in adjusted and "dependencies" in adjusted.get("project", {}):
+                # Only remove if there wasn't one originally.
+                if "requirements.txt" not in original:
+                    temp_req.unlink(missing_ok=True)
     else:
         raise NotImplementedError(
             f"Only know how to patch requirements.txt and pyproject.toml (in {location})"
@@ -228,10 +288,12 @@ async def super_tox(conf, environment: str):
     queue = asyncio.Queue()
     end = settings.sample or sys.maxsize
     for repo in itertools.islice(settings.cache_folder.iterdir(), 0, end):
+        if not repo.is_dir():
+            continue
         if not re.match(settings.repo_re, repo.name, re.IGNORECASE):
             logger.info("Skipping %s - doesn't match specified pattern", repo)
             continue
-        if not (repo / "tox.ini").exists():
+        if not (repo / "tox.ini").exists() and not (repo / "pyproject.toml").exists():
             continue
         if settings.fresh_tox:
             tox_cache = repo / ".tox"
@@ -276,31 +338,31 @@ async def super_tox(conf, environment: str):
     for task in tasks:
         task.cancel()
 
-    await asyncio.gather(*tasks)
-    results.sort(key=lambda d: d["location"])
+    await asyncio.gather(*tasks, return_exceptions=True)
+    results.sort(key=lambda d: str(d.get("location", "")))
     success_count = 0
 
     for result in results:
-        try:
-            if not result["passed"]:
-                continue
-        # FIXME these exceptions never happen...
-        except (TypeError, asyncio.CancelledError) as e:
-            logger.error("Task was cancelled: %s", e, exc_info=True)
+        if not isinstance(result, dict):
+            logger.error("Unexpected result type: %s", result)
             continue
-        except Exception as e:
-            logger.error("Unable to process result: %s", e, exc_info=True)
+        if not result.get("passed"):
             continue
         success_count += 1
+    if not results:
+        print("No repositories were tested.")
+        return
     pct = 100 * success_count // len(results)
     print(f"{success_count} out of {len(results)} ({pct}%) runs passed.")
     if settings.verbose:
         print("Failed for these repos:")
-        pprint.pprint([
-            str(d["location"].relative_to(settings.cache_folder))
-            for d in results
-            if not d["passed"]
-        ])
+        pprint.pprint(
+            [
+                str(d["location"].relative_to(settings.cache_folder))
+                for d in results
+                if not d["passed"]
+            ]
+        )
 
 
 async def worker(name, queue, conf):
@@ -478,7 +540,7 @@ def fixme(f):
 def main(
     cache_folder: str,
     e: str,
-    log_level: str,
+    log_level: typing.Literal["debug", "info", "warning", "error", "critical"],
     repo: str,
     config: pathlib.Path,
     **kwargs,
