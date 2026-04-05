@@ -25,3 +25,13 @@ repos:
         args: [ --preview ]
       - id: ruff-format
         args: [ --preview ]
+  # Run unit tests.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: tox -e test --
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
