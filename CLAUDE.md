@@ -11,7 +11,6 @@ charm-analysis is a collection of CLI tools for bulk analysis of Juju operator c
 All tools are standalone Python scripts in `tools/`. They require Python 3.11+ and dependencies managed with `uv`:
 
 ```bash
-uv run python tools/get_charms.py --cache-folder=.cache charms.csv
 uv run python tools/summarise_dependencies.py --cache-folder=.cache
 uv run python tools/summarise_libs.py --cache-folder=.cache
 uv run python tools/summarise_metadata.py --cache-folder=.cache
@@ -19,10 +18,9 @@ uv run python tools/summarise_tests.py --cache-folder=.cache
 uv run python tools/summarise_code.py --cache-folder=.cache
 uv run python tools/summarise_artifacts.py --cache-folder=.cache
 uv run python tools/summarise_init.py --cache-folder=.cache
-uv run python tools/super-tox.py --cache-folder=.cache
 ```
 
-`get_charms.py` must be run first to populate the cache with cloned repos. The input CSV must have "Charm Name" and "Repository" columns.
+The `.cache` folder must be populated with cloned charm repositories before running these tools. Use [canonical/hyrum](https://github.com/canonical/hyrum) to clone and refresh the repos; it replaces the former `get_charms.py` and `super-tox.py` tools.
 
 ## Linting and Formatting
 
@@ -44,15 +42,10 @@ Ruff runs with `--preview` mode enabled. Pre-commit excludes the `lib/` director
   - `iter_python_src(base)` — Finds all Python files under `src/` directories.
   - `count_and_percentage_table()` — Generates Rich tables with count/percentage columns.
 
-- **`tools/get_charms.py`** — Async git clone/pull using `asyncio.TaskGroup`. Converts HTTPS GitHub URLs to `git@` for auth. Shallow single-branch clones.
-
-- **`tools/super-tox.py`** — Async tox orchestrator. Can patch ops library versions in charm dependencies. Configured via `super-tox.toml` for repository exclusions. Key flags: `--executable`, `--ops-source`, `--workers`, `--sample`.
-
 - **`tools/summarise_*.py`** — Each analysis script follows the same pattern: iterate repos via helpers, collect data into counters/collections, print Rich tables. `summarise_code.py` and `summarise_init.py` use Python's `ast` module for source code introspection. `summarise_artifacts.py` queries the CharmHub API via `httpx`.
 
 ## Key Patterns
 
 - All CLI tools use `click` for argument parsing.
-- Async I/O via `asyncio.TaskGroup()` (Python 3.11+ requirement) for concurrent git/tox operations.
 - The `.cache` folder (configurable via `--cache-folder`) holds all cloned charm repositories and is not committed.
 - CSV files (`charms.csv`, `test_*.csv`) list charm repositories to analyze and are not committed.

@@ -2,42 +2,14 @@
 
 A collection of utilities to perform analysis on a set of charms.
 
+## Populating the cache
+
+The analysis tools below expect a `.cache` folder containing cloned charm
+repositories. Use [canonical/hyrum](https://github.com/canonical/hyrum) to
+clone and refresh the repositories; it has succeeded the previous
+`get_charms.py` and `super-tox.py` tools that used to live here.
+
 ## Tools
-
-### get_charms
-
-```shellscript
-$ python get_charms.py --help
-Usage: get_charms.py [OPTIONS] CHARM_LIST
-
-  Ensure updated repositories for all the charms from the provided list.
-
-  If a repository does not exist, clone it, otherwise do a pull. Assumes that
-  all the repositories are in an essentially read-only state and so pull will
-  run cleanly.
-
-  The `git` CLI tool is used via a subprocess, so must be able to handle any
-  authentication required.
-
-Options:
-  --cache-folder TEXT
-  --help               Show this message and exit.
-```
-
-This tool uses the `git` CLI tool to clone a provided list of repositories, or
-if those repositories already exist, then will `git pull` each of them. The
-clones are shallow single branch, and the assumption is that `pull` will always
-run cleanly (for example, because there are no local changes). The CLI should be
-configured with appropriate permission to clone and pull each repository.
-
-By default, the repositories are cloned into a `.cache` folder, but this can be
-changed using the `--cache-folder` option.
-
-The input must be a CSV file that has "Charm Name" (only used for logging) and
-"Repository" columns. The repository must be a source that can be provided to
-`git`, for example `https://github.com/canonical/operator`. To simplify
-authentication, `https://github.com/` is replaced by `git@github.com:` when
-calling the CLI.
 
 ### summarise_dependencies
 
@@ -378,55 +350,6 @@ Example output:
 └──────┴───────┴────────────┘
 ```
 
-### super-tox
-
-Run a tox environment across all of the charms at once.
-
-To specify the `tox` to use, pass the executable with the `--executable` flag,
-for example:
-
-* `super-tox.py --executable=~/.local/bin/tox`
-* `super-tox.py --executable='uvx tox'
-* `super-tox.py --executable='uvx --python=3.8 tox'
-
-A configuration file can be provided to skip repositories if required, in the
-form:
-
-```toml
-[ignore]
-
-# Intended for repos where it's too expensive to run the tests.
-expensive = ["repo1", "repo2"]
-
-# Intended for tests that interaction.
-manual = ["repo3"]
-
-# Intended for tests that need dependencies that cannot be installed.
-requirements = ["repo4", "repo5"]
-
-# Intended for tests that don't use the `ops` library.
-not_ops = ["repo6"]
-
-# Intended for any other cases.
-misc = ["repo7"]
-```
-
-TODO:
-
-* [x] There are a few charms that are explicitly excluded - these probably belong
-  in a configuration file.
-* [x] Handle more types of dependency patching for using the latest version of ops.
-* [ ] Need to do more with the actual results, not just check that everything was ok.
-  For example, how many tests were collected?
-* [ ] Should be able to do the "--" thing so can do e.g. "-k some-common-thing"
-* [x] Should be able to target a subset of charms (maybe the above would do this?)
-* [x] Automate running this in a lxd (or whatever) VM, to decrease the risk.
-* [ ] It would be good to also run the tests against scenario, pytest-operator (maybe others), even though those are not charms - figure out the best way to do that.
-* [ ] It would be very handy to be able to say "compare this version of ops and this version and list the tests that fail/pass only in one case"
-* [x] Ideally, we could specify which version of Python to use in tox - this would require either adjusting the tox.ini file to specify the base Python or perhaps we just specify an exact path to tox, and rely on it being installed with the version we want?
-* [ ] A lot of tests seem to fail with Python 3.12 - is this the charms, the tests, tox, super-tox, ... ?
-* [ ] Maybe patch out pytest running in parallel, or at least how many workers? e.g. mysql-router-k8s does --numprocesses=120 and that is very taxing while running other charm tests in parallel as well
-
 ## To-do
 
 * [ ] When was the (main branch of the) repo last updated?
@@ -435,4 +358,3 @@ TODO:
 * [ ] I think there's a bug in the monorepo handling where it thinks that the cache folder is a monorepo.
 * [ ] It seems like mixing the charmhub info and the regular info would be informative.
 * [ ] Should add the repo for the tutorial so we don't break that (and add repos for any other significant docs?)
-* [ ] Can I hook up doctest to the super-tox type system?
