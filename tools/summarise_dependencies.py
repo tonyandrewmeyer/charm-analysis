@@ -23,7 +23,11 @@ def _ops_version(line: str, location: pathlib.Path):
     """Extract out the version specifier from a requirements line."""
     if line == "ops":
         return "latest"
-    req = packaging.requirements.Requirement(line)
+    try:
+        req = packaging.requirements.Requirement(line)
+    except packaging.requirements.InvalidRequirement:
+        logger.warning("Could not parse requirement %r in %s", line, location)
+        return "unparseable"
     if req.marker:
         logger.info("ops in %s has marker %s", location, req.marker)
     if req.url:
@@ -99,10 +103,17 @@ def pyproject_toml(
     python_versions: collections.Counter,
     optional_dependency_sections: collections.Counter,
     dev_dependencies=collections.Counter,
+    dependency_groups: collections.Counter = None,
+    dependency_group_deps: collections.Counter = None,
 ):
     with location.open("rb") as pyproject:
         data = tomllib.load(pyproject)
         project = data.get("project", {})
+        for group, entries in data.get("dependency-groups", {}).items():
+            dependency_groups[group] += 1
+            for entry in entries:
+                if isinstance(entry, str):
+                    dependency_group_deps[entry] += 1
         if "dependencies" in project:
             yield "pyproject.toml"
             for dep in project["dependencies"]:
@@ -171,6 +182,8 @@ def main(cache_folder: str):
     all_dependencies_pinned = collections.Counter()
     dev_dependencies = collections.Counter()
     optional_dependency_sections = collections.Counter()
+    dependency_groups = collections.Counter()
+    dependency_group_deps = collections.Counter()
     for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
         # Look for requirements.txt, setup.py, and pyproject.toml.
@@ -211,10 +224,10 @@ def main(cache_folder: str):
                 python_versions,
                 optional_dependency_sections,
                 dev_dependencies,
+                dependency_groups,
+                dependency_group_deps,
             ):
                 dependencies_source[source] += 1
-    assert not python_versions, "Found some Python versions, add that to the report!"
-    assert not dev_dependencies, "Found some dev dependencies, add that to the report!"
     report(
         total,
         dependencies_source,
@@ -222,6 +235,10 @@ def main(cache_folder: str):
         all_dependencies,
         all_dependencies_pinned,
         optional_dependency_sections,
+        python_versions,
+        dev_dependencies,
+        dependency_groups,
+        dependency_group_deps,
     )
 
 
@@ -232,6 +249,10 @@ def report(
     all_dependencies,
     all_dependencies_pinned,
     optional_dependency_sections,
+    python_versions,
+    dev_dependencies,
+    dependency_groups,
+    dependency_group_deps,
 ):
     """Output a report of the results to the console."""
     console = rich.console.Console()
@@ -270,6 +291,40 @@ def report(
         "Section",
         total,
         sorted(optional_dependency_sections.items()),
+    )
+    console.print(table)
+    console.print()
+
+    table = count_and_percentage_table(
+        "Python Versions", "Version", total, sorted(python_versions.items())
+    )
+    console.print(table)
+    console.print()
+
+    common_dev = sorted(dev_dependencies.items(), key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table(
+        "Dev Dependencies", "Package", total, common_dev[:50]
+    )
+    console.print(table)
+    console.print()
+
+    table = count_and_percentage_table(
+        "PEP 735 Dependency Groups",
+        "Group",
+        total,
+        sorted(dependency_groups.items(), key=operator.itemgetter(1), reverse=True),
+    )
+    console.print(table)
+    console.print()
+
+    combined = sorted(
+        dependency_group_deps.items(), key=operator.itemgetter(1), reverse=True
+    )
+    table = count_and_percentage_table(
+        "PEP 735 Dependency Group Packages (combined across all groups)",
+        "Package",
+        total,
+        combined[:50],
     )
     console.print(table)
     console.print()
