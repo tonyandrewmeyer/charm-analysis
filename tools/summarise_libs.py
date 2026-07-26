@@ -5,18 +5,25 @@
 import ast
 import collections
 import logging
-import operator
 import pathlib
 
 import click
+import packaging.requirements
+import packaging.utils
 import rich.console
 
 from helpers import configure_logging
 from helpers import count_and_percentage_table
 from helpers import iter_repositories
+from helpers import parse_module
 
 
 logger = logging.getLogger(__name__)
+
+# A charm lib is identified by the charm that provides it, the name of the
+# module, the API (major) version, the patch (minor) version, and one of the
+# libs's PYDEPS (or None, if it has none).
+LibKey = tuple[str, str, str, int | None, str | None]
 
 
 @click.option("--cache-folder", default=".cache")
@@ -26,78 +33,141 @@ def main(cache_folder: str):
     configure_logging()
 
     total = 0
-    lib_count = collections.Counter()
-    libs = collections.Counter()
-    lib_deps = collections.Counter()
+    lib_count: collections.Counter[int] = collections.Counter()
+    libs: collections.Counter[str] = collections.Counter()
+    lib_deps: collections.Counter[LibKey] = collections.Counter()
     for repo in iter_repositories(pathlib.Path(cache_folder)):
         total += 1
-        if (repo / "lib" / "charms").exists():
-            ignored = 0
-            for total_libs, lib in enumerate((repo / "lib" / "charms").iterdir()):
-                if not lib.is_dir():
-                    logger.info("Assuming %s is not a charm lib", lib)
-                    ignored += 1
-                    continue
-                libs[lib.name] += 1
-                count_dependencies(lib_deps, lib)
-            lib_count[total_libs + 1 - ignored] += 1
-        else:
+        charms_folder = repo / "lib" / "charms"
+        if not charms_folder.is_dir():
             lib_count[0] += 1
+            continue
+        found = 0
+        for lib_folder in sorted(charms_folder.iterdir()):
+            if not lib_folder.is_dir():
+                logger.info("Assuming %s is not a charm lib", lib_folder)
+                continue
+            libs[lib_folder.name] += 1
+            found += count_dependencies(lib_deps, lib_folder)
+        lib_count[found] += 1
 
     report(total, lib_count, libs, lib_deps)
 
 
-def count_dependencies(lib_deps, lib_folder):
-    for major_version_folder in lib_folder.iterdir():
+def _constant(node: ast.expr | None) -> object | None:
+    """Return the value of an AST node if it is a literal constant, else None."""
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def _is_ops(pydep: str) -> bool:
+    """Report whether a PYDEPS entry is a requirement on ops itself."""
+    try:
+        req = packaging.requirements.Requirement(pydep)
+    except packaging.requirements.InvalidRequirement:
+        return False
+    return packaging.utils.canonicalize_name(req.name) == "ops"
+
+
+def _lib_metadata(lib: pathlib.Path) -> tuple[str | None, int | None, list[str] | None]:
+    """Extract the LIBAPI, LIBPATCH, and PYDEPS values from a charm lib module.
+
+    Any of the values is None if the lib does not define it (or defines it as
+    something other than a literal).
+    """
+    tree = parse_module(lib)
+    if tree is None:
+        # parse_module has already logged why.
+        return None, None, None
+    api_version: str | None = None
+    patch_version: int | None = None
+    pydeps: list[str] | None = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if target.id == "LIBAPI":
+                value = _constant(node.value)
+                api_version = None if value is None else str(value)
+            elif target.id == "LIBPATCH":
+                value = _constant(node.value)
+                patch_version = value if isinstance(value, int) else None
+            elif target.id == "PYDEPS":
+                if isinstance(node.value, (ast.List, ast.Tuple)):
+                    pydeps = [
+                        element.value
+                        for element in node.value.elts
+                        if isinstance(element, ast.Constant)
+                        and isinstance(element.value, str)
+                    ]
+                else:
+                    logger.warning("PYDEPS in %s is not a literal list", lib)
+    return api_version, patch_version, pydeps
+
+
+def count_dependencies(
+    lib_deps: collections.Counter[LibKey], lib_folder: pathlib.Path
+) -> int:
+    """Count the PYDEPS of every lib provided by a charm.
+
+    Args:
+        lib_deps: counter to add the (charm, lib, major, minor, dep) keys to.
+        lib_folder: a ``lib/charms/<charm-name>`` folder.
+
+    Returns:
+        The number of lib modules found in the folder.
+    """
+    found = 0
+    for major_version_folder in sorted(lib_folder.iterdir()):
         if not major_version_folder.is_dir():
             logger.debug("Ignoring %s", major_version_folder)
             continue
+        if not major_version_folder.name.startswith("v"):
+            # Charm libs live in a "v{API version}" folder - anything else
+            # (such as __pycache__) is not a charm lib.
+            logger.info("Ignoring non-version folder %s", major_version_folder)
+            continue
         major_version = major_version_folder.name[1:]
-        for lib in major_version_folder.iterdir():
-            if not lib.is_file():
+        for lib in sorted(major_version_folder.iterdir()):
+            if not lib.is_file() or lib.suffix != ".py":
                 logger.debug("Ignoring %s", lib)
                 continue
-            minor_version = None
-            pydeps = None
-            with lib.open() as charm:
-                tree = ast.parse(charm.read())
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
-                            if (
-                                target.id == "LIBAPI"
-                                and str(node.value.value) != major_version
-                            ):
-                                logger.warning(
-                                    "Lib version mismatch: %s != %s",
-                                    node.value.value,
-                                    major_version,
-                                )
-                            elif target.id == "LIBPATCH":
-                                minor_version = node.value.value
-                            elif target.id == "PYDEPS":
-                                pydeps = node.value.elts
-            if minor_version is None:
+            found += 1
+            api_version, patch_version, pydeps = _lib_metadata(lib)
+            if api_version is not None and api_version != major_version:
+                logger.warning(
+                    "Lib version mismatch in %s: %s != %s",
+                    lib,
+                    api_version,
+                    major_version,
+                )
+            if patch_version is None:
                 logger.warning("No LIBPATCH found for %s", lib)
-            if pydeps is None:
-                logger.info("%s does not have any PYDEPS", lib)
+            if not pydeps:
+                if pydeps is None:
+                    logger.info("%s does not have any PYDEPS", lib)
                 lib_deps[
-                    lib_folder.name, lib.name, major_version, minor_version, None
+                    lib_folder.name, lib.name, major_version, patch_version, None
                 ] += 1
                 continue
             for pydep in pydeps:
-                pydep = pydep.value
-                if pydep.startswith(("ops<=", "ops==", "ops>=")):
+                if _is_ops(pydep):
                     # ops is not a real dependency - it will always be in the
                     # charm requirements.
                     continue
                 lib_deps[
-                    lib_folder.name, lib.name, major_version, minor_version, pydep
+                    lib_folder.name, lib.name, major_version, patch_version, pydep
                 ] += 1
+    return found
 
 
-def report(total, repo_lib_count, lib_usage, lib_deps):
+def report(
+    total: int,
+    repo_lib_count: collections.Counter[int],
+    lib_usage: collections.Counter[str],
+    lib_deps: collections.Counter[LibKey],
+) -> None:
     """Output a report of the results to the console."""
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
@@ -109,16 +179,17 @@ def report(total, repo_lib_count, lib_usage, lib_deps):
         sorted(repo_lib_count.items()),
     )
     table.add_section()
-    lib_total = sum(repo_lib_count.values())
-    pct = f"{(lib_total / total * 100):.1f}" if total else "N/A"
-    table.add_row("Total", str(lib_total), pct)
+    # The counter maps "number of libs in a repo" to "number of repos", so the
+    # total number of libs is the sum of the products, and the average per
+    # repository is more meaningful than a percentage.
+    lib_total = sum(count * repos for count, repos in repo_lib_count.items())
+    average = f"{(lib_total / total):.1f} per charm" if total else "N/A"
+    table.add_row("Total", str(lib_total), average)
     console.print(table)
     console.print()
 
-    common_libs = [(env, count) for env, count in lib_usage.items()]
-    common_libs.sort(key=operator.itemgetter(1), reverse=True)
     table = count_and_percentage_table(
-        "Common Charm Libs", "Lib", total, common_libs[:20]
+        "Common Charm Libs", "Lib", total, lib_usage.most_common(20)
     )
     console.print(table)
     console.print()
@@ -127,34 +198,37 @@ def report(total, repo_lib_count, lib_usage, lib_deps):
     # They should either just show the first column or there's probably some
     # better way to show this information.
     table = count_and_percentage_table(
-        "Charm Lib PYDEPS", "Dependency", total, sorted(lib_deps.items())
+        "Charm Lib PYDEPS (by lib version)",
+        "Dependency",
+        total,
+        sorted(lib_deps.items()),
     )
     console.print(table)
     console.print()
 
-    no_deps = set()
-    all_libs = set()
-    simple_deps = collections.Counter()
-    for (group, lib, major, minor, dep), count in lib_deps.items():
-        lib = f"{group}/{lib}"
-        all_libs.add(lib)
+    no_deps: set[str] = set()
+    all_libs: set[str] = set()
+    simple_deps: collections.Counter[tuple[str, str]] = collections.Counter()
+    for (group, lib, _major, _minor, dep), count in lib_deps.items():
+        name = f"{group}/{lib}"
+        all_libs.add(name)
         if dep is None:
-            no_deps.add(lib)
-        simple_deps[lib, dep or "None"] = count
+            no_deps.add(name)
+        simple_deps[name, dep or "None"] += count
     logger.info("%s of %s libs have no dependencies", len(no_deps), len(all_libs))
     table = count_and_percentage_table(
-        "Charm Lib PYDEPS", "Dependency", total, sorted(simple_deps.items())
+        "Charm Lib PYDEPS (by lib)", "Dependency", total, sorted(simple_deps.items())
     )
     console.print(table)
     console.print()
 
-    deps = collections.Counter()
-    for (group, lib, major, minor, dep), count in lib_deps.items():
+    deps: collections.Counter[str] = collections.Counter()
+    for (_group, _lib, _major, _minor, dep), count in lib_deps.items():
         if dep is None:
             continue
         deps[dep] += count
     table = count_and_percentage_table(
-        "Charm Lib PYDEPS", "Dependency", total, sorted(deps.items())
+        "Charm Lib PYDEPS (by dependency)", "Dependency", total, sorted(deps.items())
     )
     console.print(table)
     console.print()
