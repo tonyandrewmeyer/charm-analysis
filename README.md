@@ -491,6 +491,124 @@ Example output:
 └────────┴───────┴────────────┘
 ```
 
+### summarise_lint
+
+Looks at how the charms configure their linters and formatters:
+
+* Which of ruff, black, isort and flake8 does a charm configure, and in what
+  combination?
+* Which ruff rule sets are selected, and which rules are most often ignored?
+* What line length is configured?
+* How many charms have a `.pre-commit-config.yaml`, and which hooks does it run?
+
+Configuration is read from `pyproject.toml`, `ruff.toml`/`.ruff.toml`, `.flake8`,
+`setup.cfg`, `tox.ini` and `.isort.cfg`. A charm in a monorepo often relies on
+configuration at the root of the repository, so the ancestors of the charm are
+searched as well as the charm folder itself. Hooks in a `.pre-commit-config.yaml`
+also count as configuring a tool, so a charm that only runs ruff through
+pre-commit is not missed.
+
+Example output:
+
+```
+9 out of 9 charms configure a linter or formatter, and 1 out of 9 charms have a
+.pre-commit-config.yaml.
+
+          Lint Tools
+┏━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Tool  ┃ Count ┃ Percentage ┃
+┡━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ ruff  │     9 │      100.0 │
+│ black │     3 │       33.3 │
+│ isort │     1 │       11.1 │
+└───────┴───────┴────────────┘
+
+       Lint Tool Combinations
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Tools        ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ ruff         │     5 │       55.6 │
+│ ruff + black │     3 │       33.3 │
+│ ruff + isort │     1 │       11.1 │
+└──────────────┴───────┴────────────┘
+
+      Configured Line Length
+┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Characters ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 99         │     9 │      100.0 │
+└────────────┴───────┴────────────┘
+
+         Ruff Rule Sets
+┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Rule Set ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ F        │     9 │      100.0 │
+│ C        │     9 │      100.0 │
+│ E        │     9 │      100.0 │
+│ N        │     9 │      100.0 │
+│ W        │     9 │      100.0 │
+│ D        │     9 │      100.0 │
+│ I        │     7 │       77.8 │
+│ CPY      │     5 │       55.6 │
+│ R        │     4 │       44.4 │
+│ SIM      │     3 │       33.3 │
+│ S        │     3 │       33.3 │
+│ RUF      │     3 │       33.3 │
+│ TC       │     3 │       33.3 │
+│ A        │     3 │       33.3 │
+│ B        │     3 │       33.3 │
+│ UP       │     3 │       33.3 │
+│ Q        │     1 │       11.1 │
+└──────────┴───────┴────────────┘
+
+    Most Ignored Ruff Rules
+┏━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Rule   ┃ Count ┃ Percentage ┃
+┡━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ D107   │     9 │      100.0 │
+│ E501   │     9 │      100.0 │
+│ D203   │     5 │       55.6 │
+│ D213   │     5 │       55.6 │
+│ N818   │     4 │       44.4 │
+│ RET504 │     4 │       44.4 │
+│ D400   │     4 │       44.4 │
+│ D407   │     4 │       44.4 │
+│ D204   │     4 │       44.4 │
+│ D413   │     4 │       44.4 │
+│ D404   │     4 │       44.4 │
+│ D215   │     4 │       44.4 │
+│ D409   │     4 │       44.4 │
+│ D406   │     4 │       44.4 │
+│ D408   │     4 │       44.4 │
+│ C901   │     2 │       22.2 │
+│ D103   │     2 │       22.2 │
+│ D100   │     2 │       22.2 │
+│ D101   │     2 │       22.2 │
+│ D102   │     2 │       22.2 │
+└────────┴───────┴────────────┘
+
+            Common Pre-commit Hooks
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Hook                    ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ ruff-format             │     1 │      100.0 │
+│ check-added-large-files │     1 │      100.0 │
+│ detect-private-key      │     1 │      100.0 │
+│ conventional-pre-commit │     1 │      100.0 │
+│ debug-statements        │     1 │      100.0 │
+│ requirements-txt-fixer  │     1 │      100.0 │
+│ trailing-whitespace     │     1 │      100.0 │
+│ mypy                    │     1 │      100.0 │
+│ isort                   │     1 │      100.0 │
+│ markdownlint            │     1 │      100.0 │
+│ ruff                    │     1 │      100.0 │
+│ codespell               │     1 │      100.0 │
+│ end-of-file-fixer       │     1 │      100.0 │
+└─────────────────────────┴───────┴────────────┘
+
+```
+
 ## To-do
 
 * [x] When was the (main branch of the) repo last updated? (`summarise_history`)
