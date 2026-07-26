@@ -415,9 +415,85 @@ Example output:
 └──────┴───────┴────────────┘
 ```
 
+### summarise_history
+
+Uses the git history of the cloned repositories to answer questions like:
+
+* When was the charm last worked on?
+* How busy has it been over the last 90 and 365 days?
+* How many people have worked on it?
+* How long has it existed?
+* Is the default branch `main` or `master`?
+
+In a monorepo, the history is scoped to the folder holding each charm, so the
+answers are about the charm rather than about its neighbours. Pass
+`--no-details` to leave out the per-charm table and print only the aggregates.
+Note that a shallow clone has no early history: the first commit and the number
+of authors are lower bounds, and the affected repositories are logged.
+
+Example output:
+
+```
+4 out of 4 charms have a git history.
+
+                                                Charm History
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┓
+┃ Charm                                ┃ Last Commit ┃ First Commit ┃ Commits (90d) ┃ Commits (365d) ┃ Authors ┃ Branch ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┩
+│ grafana-k8s-operator                 │ 2026-07-14  │ 2020-08-28   │            30 │             73 │      42 │ main   │
+│ istio-operators/charms/istio-gateway │ 2026-07-16  │ 2021-10-07   │             2 │              7 │      20 │ main   │
+│ istio-operators/charms/istio-pilot   │ 2026-07-16  │ 2020-03-30   │             1 │              7 │      24 │ main   │
+│ postgresql-k8s-operator              │ 2026-07-21  │ 2026-07-21   │             1 │              1 │       1 │ main   │
+└──────────────────────────────────────┴─────────────┴──────────────┴───────────────┴────────────────┴─────────┴────────┘
+
+               Last Commit
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Age               ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ up to a week      │     1 │       25.0 │
+│ up to a month     │     3 │       75.0 │
+│ up to 3 months    │     0 │        0.0 │
+│ up to 6 months    │     0 │        0.0 │
+│ up to a year      │     0 │        0.0 │
+│ up to 2 years     │     0 │        0.0 │
+│ more than 2 years │     0 │        0.0 │
+└───────────────────┴───────┴────────────┘
+
+     Commits in the Last 90 Days
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Commits      ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0            │     0 │        0.0 │
+│ 1            │     2 │       50.0 │
+│ 2-5          │     1 │       25.0 │
+│ 6-20         │     0 │        0.0 │
+│ 21-50        │     1 │       25.0 │
+│ more than 50 │     0 │        0.0 │
+└──────────────┴───────┴────────────┘
+
+          Distinct Authors
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Authors      ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 0            │     0 │        0.0 │
+│ 1            │     1 │       25.0 │
+│ 2-5          │     0 │        0.0 │
+│ 6-20         │     1 │       25.0 │
+│ 21-50        │     2 │       50.0 │
+│ more than 50 │     0 │        0.0 │
+└──────────────┴───────┴────────────┘
+
+      Checked-out Branch
+┏━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Branch ┃ Count ┃ Percentage ┃
+┡━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ main   │     3 │      100.0 │
+└────────┴───────┴────────────┘
+```
+
 ## To-do
 
-* [ ] When was the (main branch of the) repo last updated?
+* [x] When was the (main branch of the) repo last updated? (`summarise_history`)
 * [ ] Is the charm on charmhub? If so, when was it last published?
 * [ ] Check ['definition of great'](https://docs.google.com/document/d/1_2jTMSAaHRSX8B08upqOfhYyxAg9LwmcoS8eD-uVHx0/edit#heading=h.xc0m9jobc7ma)
 * [ ] I think there's a bug in the monorepo handling where it thinks that the cache folder is a monorepo.
