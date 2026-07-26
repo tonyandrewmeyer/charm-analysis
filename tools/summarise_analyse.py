@@ -12,9 +12,7 @@ import typing
 
 import click
 import rich.console
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
+from helpers import configure_logging, count_and_percentage_table, iter_repositories
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +31,13 @@ def pack_repo(repo: pathlib.Path, repack: bool) -> bool:
     if not repack and tuple(repo.glob("*.charm")):
         return True
     try:
-        subprocess.run(
-            ["charmcraft", "pack"], check=True, cwd=repo, capture_output=True
-        )
+        subprocess.run(["charmcraft", "pack"], check=True, cwd=repo, capture_output=True)
     except FileNotFoundError:
         logger.error("charmcraft is not installed, so %s cannot be packed.", repo)
         return False
     except subprocess.CalledProcessError as e:
         # It might be interesting to look into these, but it seems out of scope for analyse.
-        logger.error(
-            "Failed to pack charm: %s: %s (%r/%r)", repo, e, e.stdout, e.stderr
-        )
+        logger.error("Failed to pack charm: %s: %s (%r/%r)", repo, e, e.stdout, e.stderr)
         return False
     # Remove the build environment - otherwise, this ends up using a huge amount
     # of disk space (in /var/snap/lxd).
@@ -84,17 +78,17 @@ def analyse_repo(repo: pathlib.Path, repack: bool) -> dict[str, set[str]]:
                     logger.warning("%s (%s): %s %s", repo, charm_name, prev_line, line)
                     continuation = None
                 continue
-            if line.startswith((
-                "language: Charm language unknown",
-                "framework: The charm is not based on any known Framework",
-            )):
+            if line.startswith(
+                (
+                    "language: Charm language unknown",
+                    "framework: The charm is not based on any known Framework",
+                )
+            ):
                 logger.info("%s (%s): %s", repo, charm.name, line)
                 continue
             mo = RESULT_RE.match(line)
             if not mo:
-                logger.error(
-                    "Couldn't parse analyse output: %s (%s): %s", repo, charm.name, line
-                )
+                logger.error("Couldn't parse analyse output: %s (%s): %s", repo, charm.name, line)
                 continue
             key = mo.group("key")
             result = mo.group("result")
@@ -124,9 +118,7 @@ LogLevel = typing.Literal["debug", "info", "warning", "error", "critical"]
 @click.option(
     "--log-level",
     default="info",
-    type=click.Choice(
-        ["debug", "info", "warning", "error", "critical"], case_sensitive=False
-    ),
+    type=click.Choice(["debug", "info", "warning", "error", "critical"], case_sensitive=False),
     help="Verbosity of the logging output.",
 )
 @click.command()

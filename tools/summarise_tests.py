@@ -14,10 +14,7 @@ from collections.abc import Iterable, Iterator
 
 import click
 import rich.console
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import parse_module
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +25,16 @@ STATIC_CHECKERS = re.compile(r"\b(pyright|mypy|pyrefly|ty)\b")
 # Names that are only available from `ops.testing` when using Scenario (as
 # opposed to Harness). Used to tell the two frameworks apart, since ops 2.17
 # re-exports Scenario from `ops.testing`.
-SCENARIO_NAMES = frozenset({
-    "Context",
-    "State",
-    "Manager",
-    "CharmEvents",
-    "CheckInfo",
-    "Notice",
-})
+SCENARIO_NAMES = frozenset(
+    {
+        "Context",
+        "State",
+        "Manager",
+        "CharmEvents",
+        "CheckInfo",
+        "Notice",
+    }
+)
 HARNESS_NAMES = frozenset({"Harness", "ExecArgs", "ExecResult"})
 
 # Frameworks that are detected purely by the top level module that is imported.
@@ -244,9 +243,7 @@ def find_test_frameworks(tests: pathlib.Path, repo: pathlib.Path) -> set[str]:
     """Identify the test frameworks used by the tests in the given folder."""
     imports = set(find_test_imports(tests))
     frameworks = {
-        key
-        for key, module in SIMPLE_FRAMEWORK_MODULES.items()
-        if imports_module(imports, module)
+        key for key, module in SIMPLE_FRAMEWORK_MODULES.items() if imports_module(imports, module)
     }
     harness, scenario = ops_testing_frameworks(imports)
     if harness:
@@ -321,12 +318,9 @@ def report(
     if not total:
         console.print("No repositories found.")
         return
+    console.print(f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox.")
     console.print(
-        f"{uses_tox} out of {total} ({(uses_tox / total * 100):.1f}%) use tox."
-    )
-    console.print(
-        f"{has_tests} out of {total} ({(has_tests / total * 100):.1f}%) "
-        "have a tests folder."
+        f"{has_tests} out of {total} ({(has_tests / total * 100):.1f}%) have a tests folder."
     )
     console.print()
 

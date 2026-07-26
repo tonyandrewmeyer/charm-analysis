@@ -16,10 +16,7 @@ import click
 import packaging.requirements
 import packaging.utils
 import rich.console
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import parse_module
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -55,17 +52,13 @@ class DependencyStats:
     #: The number of charm repositories that were examined.
     total: int = 0
     #: Where the dependencies were declared, e.g. "requirements.txt".
-    sources: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    sources: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: The Python versions the charms declare support for.
     python_versions: collections.Counter[str] = dataclasses.field(
         default_factory=collections.Counter
     )
     #: The version specifiers used for the 'ops' dependency.
-    ops_versions: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    ops_versions: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: Dependencies, by (normalised) package name.
     all_dependencies: collections.Counter[str] = dataclasses.field(
         default_factory=collections.Counter
@@ -92,9 +85,7 @@ class DependencyStats:
     )
 
 
-def _requirement(
-    spec: str, location: pathlib.Path
-) -> packaging.requirements.Requirement | None:
+def _requirement(spec: str, location: pathlib.Path) -> packaging.requirements.Requirement | None:
     """Parse a requirement string, logging (and returning None) if it's invalid."""
     try:
         return packaging.requirements.Requirement(spec)
@@ -199,9 +190,7 @@ def setup_py(location: pathlib.Path, stats: DependencyStats) -> bool:
             if kw.arg == "install_requires":
                 requires = _literal(kw.value, location)
                 if not isinstance(requires, (list, tuple, set)):
-                    logger.warning(
-                        "install_requires in %s is not a literal sequence", location
-                    )
+                    logger.warning("install_requires in %s is not a literal sequence", location)
                     continue
                 has_install_requires = True
                 for spec in requires:
@@ -400,9 +389,7 @@ def report(stats: DependencyStats) -> None:
         "PEP 735 Dependency Groups",
         "Group",
         total,
-        sorted(
-            stats.dependency_groups.items(), key=operator.itemgetter(1), reverse=True
-        ),
+        sorted(stats.dependency_groups.items(), key=operator.itemgetter(1), reverse=True),
     )
     console.print(table)
     console.print()

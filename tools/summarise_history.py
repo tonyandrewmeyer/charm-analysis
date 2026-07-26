@@ -14,11 +14,7 @@ from collections.abc import Iterable, Iterator
 import click
 import rich.console
 import rich.table
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +105,7 @@ def git(root: pathlib.Path, *args: str) -> str | None:
     return result.stdout
 
 
-def find_repository_root(
-    charm: pathlib.Path, base: pathlib.Path
-) -> pathlib.Path | None:
+def find_repository_root(charm: pathlib.Path, base: pathlib.Path) -> pathlib.Path | None:
     """Return the git repository that the charm is part of, or None.
 
     The charm is normally the repository itself, but a charm in a monorepo is a
@@ -157,9 +151,7 @@ def is_shallow(root: pathlib.Path) -> bool:
     return result is not None and result.strip() == "true"
 
 
-def parse_log(
-    output: str, path: pathlib.Path
-) -> Iterator[tuple[datetime.datetime, str]]:
+def parse_log(output: str, path: pathlib.Path) -> Iterator[tuple[datetime.datetime, str]]:
     """Parse the (date, author) pairs out of the output of git log."""
     for line in output.splitlines():
         date, separator, author = line.partition(FIELD_SEPARATOR)
@@ -204,8 +196,7 @@ def summarise_history(
     # commit date can put it slightly out of order, so don't rely on that.
     dates = [when for when, _ in commits]
     recent = {
-        days: sum(1 for when in dates if (now - when).days < days)
-        for days in RECENT_WINDOWS
+        days: sum(1 for when in dates if (now - when).days < days) for days in RECENT_WINDOWS
     }
 
     # A charm in a monorepo is named for its place in it, but the base folder
@@ -256,7 +247,7 @@ def main(cache_folder: str, details: bool):
     configure_logging()
 
     base = pathlib.Path(cache_folder)
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
 
     charms = 0
     histories: list[CharmHistory] = []
@@ -344,9 +335,7 @@ def report(
 
     # A monorepo has one branch but several charms, so counting the charms
     # would say more about the size of the monorepo than about the fleet.
-    branches: dict[pathlib.Path, str] = {
-        history.root: history.branch for history in histories
-    }
+    branches: dict[pathlib.Path, str] = {history.root: history.branch for history in histories}
     counts = collections.Counter(branches.values())
     table = count_and_percentage_table(
         "Checked-out Branch",

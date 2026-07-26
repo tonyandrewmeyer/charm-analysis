@@ -11,12 +11,7 @@ from typing import Any
 
 import click
 import rich.console
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import load_yaml
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -41,19 +36,13 @@ class ConfigStats:
     options_per_charm: collections.Counter[int] = dataclasses.field(
         default_factory=collections.Counter
     )
-    by_type: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    by_type: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: Options that omit "type" entirely, and so are implicitly strings.
     implicit_type: int = 0
     with_default: int = 0
     with_description: int = 0
-    naming: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
-    names: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    naming: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
+    names: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: Charms that use both "-" and "_" to separate words in option names.
     mixed_naming: list[str] = dataclasses.field(default_factory=list)
 
@@ -139,9 +128,7 @@ def summarise_config(repo: pathlib.Path) -> ConfigStats | None:
         if "type" in option:
             option_type = str(option["type"])
             if option_type not in KNOWN_OPTION_TYPES:
-                logger.warning(
-                    "%s: option %s has unknown type %r", repo, name, option_type
-                )
+                logger.warning("%s: option %s has unknown type %r", repo, name, option_type)
         else:
             option_type = DEFAULT_OPTION_TYPE
             stats.implicit_type += 1

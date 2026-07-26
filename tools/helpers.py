@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import logging
 import pathlib
-from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import rich.logging
 import rich.table
 import yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +86,7 @@ class CharmYamlLoader(yaml.SafeLoader):
         if not isinstance(node, yaml.SequenceNode):
             return items
         for index, item_node in enumerate(node.value):
-            if isinstance(item_node, yaml.ScalarNode) and isinstance(
-                items[index], bool
-            ):
+            if isinstance(item_node, yaml.ScalarNode) and isinstance(items[index], bool):
                 items[index] = item_node.value
         return items
 
@@ -116,9 +117,7 @@ def load_yaml(path: pathlib.Path) -> dict[str, Any] | None:
         return None
     finally:
         for key in loader.duplicate_keys:
-            logger.warning(
-                "Duplicate key %r in %s: only the last definition is used.", key, path
-            )
+            logger.warning("Duplicate key %r in %s: only the last definition is used.", key, path)
         loader.dispose()
     if data is None:
         # An empty document: not a problem, but there's nothing to look at.
@@ -163,18 +162,20 @@ def _is_charm(folder: pathlib.Path) -> bool:
 # Folders that never contain a charm we want to analyse, but often contain
 # something that looks like one (in particular, the minimal charms that
 # integration tests build and deploy).
-EXCLUDED_FOLDERS = frozenset({
-    "build",
-    "dist",
-    "docs",
-    "examples",
-    "lib",
-    "node_modules",
-    "spread",
-    "src",
-    "templates",
-    "venv",
-})
+EXCLUDED_FOLDERS = frozenset(
+    {
+        "build",
+        "dist",
+        "docs",
+        "examples",
+        "lib",
+        "node_modules",
+        "spread",
+        "src",
+        "templates",
+        "venv",
+    }
+)
 
 # How far below a repository to look for charms. A monorepo normally puts its
 # charms one level down (usually in "charms/"), so this allows for a little
@@ -301,10 +302,8 @@ def charm_entrypoint(repo: pathlib.Path) -> pathlib.Path | None:
         data = load_yaml(charmcraft)
         if data is not None:
             # For now, (wrongly) assume all the code is in the entrypoint module.
-            try:
+            with contextlib.suppress(KeyError, TypeError):
                 entry = data["parts"]["charm"]["charm-entrypoint"]
-            except (KeyError, TypeError):
-                pass
     if not isinstance(entry, str):
         logger.warning("Invalid charm-entrypoint in %s: %r", repo, entry)
         entry = DEFAULT_ENTRYPOINT
