@@ -14,6 +14,7 @@ All tools are standalone Python scripts in `tools/`. They require Python 3.11+ a
 uv run python tools/summarise_dependencies.py --cache-folder=.cache
 uv run python tools/summarise_libs.py --cache-folder=.cache
 uv run python tools/summarise_metadata.py --cache-folder=.cache
+uv run python tools/summarise_config.py --cache-folder=.cache
 uv run python tools/summarise_tests.py --cache-folder=.cache
 uv run python tools/summarise_code.py --cache-folder=.cache
 uv run python tools/summarise_artifacts.py --cache-folder=.cache

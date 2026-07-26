@@ -197,6 +197,71 @@ Example output:
 └────────────┴───────┴────────────┘
 ```
 
+### summarise_config
+
+Covers the `config` section of the metadata, which `summarise_metadata` does
+not. Attempts to answer questions like:
+
+* How many config options does a charm declare?
+* What types are the options?
+* How many options have a default, and how many have a description?
+* Are option names separated with `-` or `_`?
+* Which option names are shared across the fleet?
+
+Example output:
+
+```
+4 out of 5 charms declare config options, 11 in total.
+
+       Options per Charm
+┏━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Options ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ 1       │     1 │       25.0 │
+│ 2       │     1 │       25.0 │
+│ 3       │     1 │       25.0 │
+│ 5       │     1 │       25.0 │
+└─────────┴───────┴────────────┘
+
+          Option Types
+┏━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Type    ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ boolean │     2 │       18.2 │
+│ float   │     1 │        9.1 │
+│ int     │     1 │        9.1 │
+│ secret  │     1 │        9.1 │
+│ string  │     4 │       36.4 │
+└─────────┴───────┴────────────┘
+
+           Option Documentation
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Attribute         ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ Has a default     │     5 │       45.5 │
+│ Has a description │     4 │       36.4 │
+│ Type is implicit  │     2 │       18.2 │
+└───────────────────┴───────┴────────────┘
+
+        Option Naming Style
+┏━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Style       ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ hyphen      │     4 │       36.4 │
+│ single word │     6 │       54.5 │
+│ underscore  │     1 │        9.1 │
+└─────────────┴───────┴────────────┘
+
+         Common Option Names
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
+┃ Name         ┃ Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
+│ log-level    │     3 │       60.0 │
+│ port         │     1 │       20.0 │
+│ enable_thing │     1 │       20.0 │
+└──────────────┴───────┴────────────┘
+```
+
 ### summarise_tests
 
 Provides insight into the automated tests that the charms have. For example:
