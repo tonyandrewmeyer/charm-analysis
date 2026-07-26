@@ -18,6 +18,7 @@ uv run python tools/summarise_config.py --cache-folder=.cache
 uv run python tools/summarise_tests.py --cache-folder=.cache
 uv run python tools/summarise_code.py --cache-folder=.cache
 uv run python tools/summarise_artifacts.py --cache-folder=.cache
+uv run python tools/summarise_history.py --cache-folder=.cache
 uv run python tools/summarise_init.py --cache-folder=.cache
 ```
 
