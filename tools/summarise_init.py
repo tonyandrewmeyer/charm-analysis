@@ -11,10 +11,7 @@ import pathlib
 
 import click
 import rich.console
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_entries
-from helpers import parse_module
+from helpers import configure_logging, count_and_percentage_table, iter_entries, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +145,7 @@ class OperationCounter(ast.NodeVisitor):
                 # An assumption, but seems reasonable.
                 logger.debug("Not trying to recurse into list append.")
             elif isinstance(node.func.value, ast.Call) and (
-                isinstance(node.func.value.func, ast.Name)
-                and node.func.value.func.id == "super"
+                isinstance(node.func.value.func, ast.Name) and node.func.value.func.id == "super"
             ):
                 # e.g. super().__init__(framework): this is the *base* class's
                 # method, not the charm's own (recursing here would count the
@@ -277,14 +273,10 @@ def main(cache_folder: str) -> None:
         asserts.update(counter.asserts)
         explicit_return.update(counter.explicit_return)
 
-    report(
-        total, analysed, calls, calls_per_charm, names, raises, asserts, explicit_return
-    )
+    report(total, analysed, calls, calls_per_charm, names, raises, asserts, explicit_return)
 
 
-def _most_common(
-    counts: collections.Counter[str], minimum: int = 0
-) -> list[tuple[str, int]]:
+def _most_common(counts: collections.Counter[str], minimum: int = 0) -> list[tuple[str, int]]:
     """Return the counts above the minimum, most common first."""
     return sorted(
         ((k, v) for k, v in counts.items() if v > minimum),

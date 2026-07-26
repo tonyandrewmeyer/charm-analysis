@@ -11,12 +11,7 @@ import click
 import packaging.requirements
 import packaging.utils
 import rich.console
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import parse_module
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -98,17 +93,14 @@ def _lib_metadata(lib: pathlib.Path) -> tuple[str | None, int | None, list[str] 
                     pydeps = [
                         element.value
                         for element in node.value.elts
-                        if isinstance(element, ast.Constant)
-                        and isinstance(element.value, str)
+                        if isinstance(element, ast.Constant) and isinstance(element.value, str)
                     ]
                 else:
                     logger.warning("PYDEPS in %s is not a literal list", lib)
     return api_version, patch_version, pydeps
 
 
-def count_dependencies(
-    lib_deps: collections.Counter[LibKey], lib_folder: pathlib.Path
-) -> int:
+def count_dependencies(lib_deps: collections.Counter[LibKey], lib_folder: pathlib.Path) -> int:
     """Count the PYDEPS of every lib provided by a charm.
 
     Args:
@@ -147,18 +139,14 @@ def count_dependencies(
             if not pydeps:
                 if pydeps is None:
                     logger.info("%s does not have any PYDEPS", lib)
-                lib_deps[
-                    lib_folder.name, lib.name, major_version, patch_version, None
-                ] += 1
+                lib_deps[lib_folder.name, lib.name, major_version, patch_version, None] += 1
                 continue
             for pydep in pydeps:
                 if _is_ops(pydep):
                     # ops is not a real dependency - it will always be in the
                     # charm requirements.
                     continue
-                lib_deps[
-                    lib_folder.name, lib.name, major_version, patch_version, pydep
-                ] += 1
+                lib_deps[lib_folder.name, lib.name, major_version, patch_version, pydep] += 1
     return found
 
 

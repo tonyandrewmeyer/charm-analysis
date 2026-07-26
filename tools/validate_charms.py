@@ -177,9 +177,7 @@ def _is_rate_limited(response: httpx.Response) -> bool:
     )
 
 
-async def _check_url_exists(
-    client: httpx.AsyncClient, url: str
-) -> RepositoryStatus | None:
+async def _check_url_exists(client: httpx.AsyncClient, url: str) -> RepositoryStatus | None:
     """Check that a URL can be fetched, without using any forge-specific API.
 
     Returns None if the request could not be made at all.
@@ -270,9 +268,7 @@ async def check_repository_status(
     url = normalise_repository_url(repository)
     if not url:
         logger.warning("Unable to understand repository URL: %r", repository)
-        return RepositoryStatus(
-            status_code=None, error_message="Not a usable repository URL"
-        )
+        return RepositoryStatus(status_code=None, error_message="Not a usable repository URL")
 
     owner_repo = github_owner_repo(url)
     if owner_repo:
@@ -282,9 +278,7 @@ async def check_repository_status(
     return await _check_url_exists(client, url)
 
 
-async def validate_charm(
-    client: httpx.AsyncClient, charm: CharmInfo
-) -> ValidationResult:
+async def validate_charm(client: httpx.AsyncClient, charm: CharmInfo) -> ValidationResult:
     """Validate a single charm repository."""
     if not charm.repository:
         return ValidationResult(
@@ -365,9 +359,7 @@ async def get_charmhub_packages() -> list[dict]:
     ]
 
 
-async def get_charm_source_url(
-    client: httpx.AsyncClient, charm_name: str
-) -> str | None:
+async def get_charm_source_url(client: httpx.AsyncClient, charm_name: str) -> str | None:
     """Get the source URL for a charm from charmhub.
 
     Falls back to the bug tracker URL, which is generally in the same
@@ -382,9 +374,7 @@ async def get_charm_source_url(
             timeout=REQUEST_TIMEOUT,
         )
         if response.status_code != 200:
-            logger.debug(
-                "Charmhub info for %s: HTTP %d", charm_name, response.status_code
-            )
+            logger.debug("Charmhub info for %s: HTTP %d", charm_name, response.status_code)
             return None
         result = response.json().get("result") or {}
     except (httpx.HTTPError, ValueError, AttributeError) as exc:
@@ -487,9 +477,7 @@ def find_missing_charms(
 ) -> list[CharmhubCharm]:
     """Find charms publicly listed on Charmhub that are not in the CSV."""
     csv_identities = {
-        identity
-        for charm in csv_charms
-        if (identity := repository_identity(charm.repository))
+        identity for charm in csv_charms if (identity := repository_identity(charm.repository))
     }
     return [
         charm
@@ -642,9 +630,7 @@ async def collect_report(
 
 
 @click.command()
-@click.argument(
-    "charm-list", type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path)
-)
+@click.argument("charm-list", type=click.Path(exists=True, dir_okay=False, path_type=pathlib.Path))
 @click.option(
     "--validate-only",
     is_flag=True,
@@ -681,8 +667,7 @@ def main(
     output_format: str,
     concurrency: int,
 ) -> None:
-    """
-    Validate charm repositories and find missing charms from Charmhub.
+    """Validate charm repositories and find missing charms from Charmhub.
 
     This tool checks that all repositories in the CSV are accessible and not archived,
     and optionally finds charms published on Charmhub that are not in the CSV file.

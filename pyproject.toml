@@ -13,3 +13,51 @@ dependencies = [
     "pyyaml>=6.0.2",
     "rich>=13.8.0",
 ]
+
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E",
+    "W",
+    "I",
+    "N",
+    "A",
+    "UP",
+    "YTT",
+    "S",
+    "B",
+    "SIM",
+    "RUF",
+    "PERF",
+    "D",
+    "FA",
+    "TC",
+]
+ignore = [
+    "D105",
+    "D107",
+    "D203",
+    "D204",
+    "D213",
+    "D215",
+    "D400",
+    "D404",
+    "D406",
+    "D407",
+    "D408",
+    "D409",
+    "D413",
+    # Method docstrings are not mandated; module/class/function docs are.
+    "D102",
+    # This tool deliberately shells out to juju/charmcraft/snap.
+    "S603",
+    "S607",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.0",
+]

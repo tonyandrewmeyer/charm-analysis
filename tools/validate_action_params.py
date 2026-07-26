@@ -29,11 +29,7 @@ from typing import Any, Literal, TextIO
 import click
 import rich.console
 import rich.table
-
-from helpers import configure_logging
-from helpers import iter_repositories
-from helpers import load_yaml
-from helpers import parse_module
+from helpers import configure_logging, iter_repositories, load_yaml, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +141,7 @@ class ValidationResult:
     manual_review: list[ManualReview] = dataclasses.field(default_factory=list)
 
 
-def _required_param_names(
-    action_name: str, required: Any, source: pathlib.Path
-) -> set[str]:
+def _required_param_names(action_name: str, required: Any, source: pathlib.Path) -> set[str]:
     """Return the set of required parameter names from a ``required`` value."""
     if required is None:
         return set()
@@ -248,9 +242,7 @@ def _parse_action(
     )
 
 
-def _actions_from_mapping(
-    data: Any, source: pathlib.Path
-) -> dict[str, ActionDefinition]:
+def _actions_from_mapping(data: Any, source: pathlib.Path) -> dict[str, ActionDefinition]:
     """Convert a mapping of action-name to action-spec into definitions.
 
     `data` is deliberately typed as Any: it is either a whole actions.yaml
@@ -363,8 +355,7 @@ def _observed_handler(handler_arg: ast.expr) -> tuple[str | None, bool]:
     """Return the (name, is_self_method) of the handler passed to observe()."""
     if isinstance(handler_arg, ast.Attribute):
         is_self_method = (
-            isinstance(handler_arg.value, ast.Name)
-            and handler_arg.value.id in _INSTANCE_ARG_NAMES
+            isinstance(handler_arg.value, ast.Name) and handler_arg.value.id in _INSTANCE_ARG_NAMES
         )
         return handler_arg.attr, is_self_method
     if isinstance(handler_arg, ast.Name):
@@ -443,10 +434,7 @@ def _find_function_by_name(
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     """Find a (possibly async) function or method definition by name."""
     for node in ast.walk(tree):
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name == name
-        ):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node
     return None
 
@@ -476,9 +464,7 @@ def _is_params_expr(node: ast.expr, event_name: str, aliases: set[str]) -> bool:
     return isinstance(node, ast.Name) and node.id in aliases
 
 
-def _params_aliases(
-    handler: ast.FunctionDef | ast.AsyncFunctionDef, event_name: str
-) -> set[str]:
+def _params_aliases(handler: ast.FunctionDef | ast.AsyncFunctionDef, event_name: str) -> set[str]:
     """Return local names that have been bound to ``<event>.params``."""
     aliases: set[str] = set()
     for node in ast.walk(handler):
@@ -544,19 +530,19 @@ def _param_accesses(
                             is_safe=True,
                         )
                     )
-            for keyword in node.keywords:
-                if keyword.arg is None and is_params(keyword.value):
-                    accesses.append(
-                        ParamAccess(
-                            param_name=None,
-                            access_type="spread",
-                            line_number=node.lineno,
-                            is_safe=True,
-                        )
-                    )
+            accesses.extend(
+                ParamAccess(
+                    param_name=None,
+                    access_type="spread",
+                    line_number=node.lineno,
+                    is_safe=True,
+                )
+                for keyword in node.keywords
+                if keyword.arg is None and is_params(keyword.value)
+            )
         # Pattern 3 (continued): {**event.params} in a dict display.
         elif isinstance(node, ast.Dict):
-            for key, value in zip(node.keys, node.values):
+            for key, value in zip(node.keys, node.values, strict=False):
                 if key is None and is_params(value):
                     accesses.append(
                         ParamAccess(
@@ -593,9 +579,7 @@ def extract_event_params(
 
     event_name = _event_arg_name(handler)
     if not event_name:
-        logger.debug(
-            "Could not detect event argument for %s in %s", handler_name, module
-        )
+        logger.debug("Could not detect event argument for %s in %s", handler_name, module)
         return [], True
 
     return _param_accesses(handler, event_name), True
@@ -751,10 +735,7 @@ def _validate_handler(
                 access_type="N/A",
                 line_number=0,
                 file_path=observe_location,
-                message=(
-                    f"Handler exists but action '{handler.action_name}' not defined "
-                    "in YAML"
-                ),
+                message=(f"Handler exists but action '{handler.action_name}' not defined in YAML"),
             )
         )
         return
@@ -850,22 +831,16 @@ def _print_summary(
             if no_actions:
                 console.print(f"  [dim]- No action definitions: {no_actions}[/dim]")
             if no_handlers:
-                console.print(
-                    f"  [dim]- Actions defined but no handlers: {no_handlers}[/dim]"
-                )
+                console.print(f"  [dim]- Actions defined but no handlers: {no_handlers}[/dim]")
         console.print()
     else:
         console.print(f"Total charms analyzed: {len(results)}")
 
     console.print(f"Charms with violations: {sum(1 for r in results if r.violations)}")
     console.print(f"Charms with warnings: {sum(1 for r in results if r.warnings)}")
-    console.print(
-        f"Total violations (errors): {sum(len(r.violations) for r in results)}"
-    )
+    console.print(f"Total violations (errors): {sum(len(r.violations) for r in results)}")
     console.print(f"Total warnings: {sum(len(r.warnings) for r in results)}")
-    console.print(
-        f"Total flagged for manual review: {sum(len(r.manual_review) for r in results)}"
-    )
+    console.print(f"Total flagged for manual review: {sum(len(r.manual_review) for r in results)}")
 
 
 def _print_param_table(
@@ -972,32 +947,34 @@ def report(
 def write_csv(results: list[ValidationResult], output: TextIO) -> None:
     """Write every violation and warning to a CSV file."""
     writer = csv.writer(output)
-    writer.writerow([
-        "charm",
-        "action",
-        "parameter",
-        "access_type",
-        "line",
-        "file",
-        "severity",
-        "additionalProperties",
-    ])
+    writer.writerow(
+        [
+            "charm",
+            "action",
+            "parameter",
+            "access_type",
+            "line",
+            "file",
+            "severity",
+            "additionalProperties",
+        ]
+    )
     for result in results:
         rows = [(v, v.access_type, "error") for v in result.violations]
         rows += [(w, ".get()", "warning") for w in result.warnings]
         for issue, access_type, severity in rows:
-            writer.writerow([
-                result.charm_name,
-                issue.action_name,
-                issue.param_name,
-                access_type,
-                issue.line_number,
-                issue.file_path,
-                severity,
-                ""
-                if issue.additional_properties is None
-                else issue.additional_properties,
-            ])
+            writer.writerow(
+                [
+                    result.charm_name,
+                    issue.action_name,
+                    issue.param_name,
+                    access_type,
+                    issue.line_number,
+                    issue.file_path,
+                    severity,
+                    "" if issue.additional_properties is None else issue.additional_properties,
+                ]
+            )
 
 
 def _charm_entrypoint(repo: pathlib.Path) -> str:
@@ -1024,9 +1001,7 @@ def _has_python_source(repo: pathlib.Path) -> bool:
 @click.command()
 @click.option("--cache-folder", default=".cache", help="Path to .cache folder")
 @click.option("--strict", is_flag=True, help="Treat warnings as errors")
-@click.option(
-    "--output-csv", type=click.File("w"), help="Also output CSV for further analysis"
-)
+@click.option("--output-csv", type=click.File("w"), help="Also output CSV for further analysis")
 @click.option("--verbose", is_flag=True, help="Show detailed logging")
 def main(cache_folder: str, strict: bool, output_csv: TextIO | None, verbose: bool):
     """Validate action parameter usage across all charms."""
@@ -1043,11 +1018,13 @@ def main(cache_folder: str, strict: bool, output_csv: TextIO | None, verbose: bo
     console.print(f"[bold]Analyzing charms in {cache_folder}...[/bold]")
 
     results: list[ValidationResult] = []
-    skip_stats: collections.Counter[str] = collections.Counter({
-        "total": 0,
-        "no_actions": 0,
-        "no_handlers": 0,
-    })
+    skip_stats: collections.Counter[str] = collections.Counter(
+        {
+            "total": 0,
+            "no_actions": 0,
+            "no_handlers": 0,
+        }
+    )
 
     for repo in iter_repositories(cache_path):
         # Skip repos with no Python source at all.

@@ -15,12 +15,7 @@ from typing import Any
 
 import click
 import rich.console
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import load_yaml
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +65,14 @@ class LintStats:
     #: Number of charms that configure any linter or formatter at all.
     charms_with_lint: int = 0
     charms_with_ruff: int = 0
-    tools: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    tools: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: The full set of tools a charm uses, as a single label.
-    combinations: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    combinations: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: Ruff rule sets ("E", "PL", ...), counted once per charm that selects them.
-    rule_sets: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    rule_sets: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     #: Individual rules a charm ignores, counted once per charm.
-    ignored: collections.Counter[str] = dataclasses.field(
-        default_factory=collections.Counter
-    )
-    line_lengths: collections.Counter[int] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    ignored: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
+    line_lengths: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter)
     with_precommit: int = 0
     precommit_hooks: collections.Counter[str] = dataclasses.field(
         default_factory=collections.Counter
@@ -396,12 +381,8 @@ def report(charms: int, stats: LintStats) -> None:
     console.print(table)
     console.print()
 
-    combinations = sorted(
-        stats.combinations.items(), key=operator.itemgetter(1), reverse=True
-    )
-    table = count_and_percentage_table(
-        "Lint Tool Combinations", "Tools", charms, combinations
-    )
+    combinations = sorted(stats.combinations.items(), key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table("Lint Tool Combinations", "Tools", charms, combinations)
     console.print(table)
     console.print()
 
@@ -415,18 +396,14 @@ def report(charms: int, stats: LintStats) -> None:
     console.print()
 
     if stats.charms_with_ruff:
-        rule_sets = sorted(
-            stats.rule_sets.items(), key=operator.itemgetter(1), reverse=True
-        )
+        rule_sets = sorted(stats.rule_sets.items(), key=operator.itemgetter(1), reverse=True)
         table = count_and_percentage_table(
             "Ruff Rule Sets", "Rule Set", stats.charms_with_ruff, rule_sets
         )
         console.print(table)
         console.print()
 
-        ignored = sorted(
-            stats.ignored.items(), key=operator.itemgetter(1), reverse=True
-        )
+        ignored = sorted(stats.ignored.items(), key=operator.itemgetter(1), reverse=True)
         table = count_and_percentage_table(
             "Most Ignored Ruff Rules",
             "Rule",
@@ -437,9 +414,7 @@ def report(charms: int, stats: LintStats) -> None:
         console.print()
 
     if stats.with_precommit:
-        hooks = sorted(
-            stats.precommit_hooks.items(), key=operator.itemgetter(1), reverse=True
-        )
+        hooks = sorted(stats.precommit_hooks.items(), key=operator.itemgetter(1), reverse=True)
         table = count_and_percentage_table(
             "Common Pre-commit Hooks",
             "Hook",

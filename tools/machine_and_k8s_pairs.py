@@ -17,9 +17,7 @@ import pathlib
 
 import click
 import rich.console
-from helpers import configure_logging
-from helpers import iter_repositories
-from helpers import load_yaml
+from helpers import configure_logging, iter_repositories, load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +121,7 @@ def report(machine: dict[str, set[str]], k8s: dict[str, set[str]]):
         f"({(len(pairs) / total * 100):.1f}%) have both machine and K8s variants."
     )
     console.print(
-        f"Machine only: {len(set(machine) - set(k8s))}. "
-        f"K8s only: {len(set(k8s) - set(machine))}."
+        f"Machine only: {len(set(machine) - set(k8s))}. K8s only: {len(set(k8s) - set(machine))}."
     )
 
 

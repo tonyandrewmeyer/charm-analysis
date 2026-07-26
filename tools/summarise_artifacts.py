@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-"""Summarise information about the charm artifacts on CharmHub"""
+"""Summarise information about the charm artifacts on CharmHub."""
 
 import collections
 import concurrent.futures
@@ -9,18 +9,12 @@ import functools
 import logging
 import pathlib
 import time
-from typing import Any
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import click
 import httpx
 import rich.console
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import load_yaml
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +98,7 @@ def fetch_charm_info(client: httpx.Client, name: str) -> dict[str, Any] | None:
                 return None
             if response.status_code not in RETRY_STATUSES:
                 if response.is_error:
-                    logger.warning(
-                        "CharmHub returned %s for %s", response.status_code, name
-                    )
+                    logger.warning("CharmHub returned %s for %s", response.status_code, name)
                     return None
                 try:
                     data = response.json()
@@ -154,7 +146,7 @@ def charm_details(client: httpx.Client, name: str) -> CharmDetails | None:
     channels: set[str] = set()
     revisions: set[int] = set()
     ages: set[int] = set()
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     for obj in channel_map:
         if not isinstance(obj, dict):
             logger.warning("Unexpected channel map entry for %s: %r", name, obj)
@@ -172,12 +164,10 @@ def charm_details(client: httpx.Client, name: str) -> CharmDetails | None:
             try:
                 release_time = datetime.datetime.fromisoformat(released_at)
             except (TypeError, ValueError):
-                logger.warning(
-                    "Cannot parse release time for %s: %r", name, released_at
-                )
+                logger.warning("Cannot parse release time for %s: %r", name, released_at)
             else:
                 if release_time.tzinfo is None:
-                    release_time = release_time.replace(tzinfo=datetime.timezone.utc)
+                    release_time = release_time.replace(tzinfo=datetime.UTC)
                 ages.add((now - release_time).days)
         # Revision also has "version" (what is the difference with 'revision'?),
         # created-at, download, and bases.
@@ -234,16 +224,18 @@ def main(cache_folder: str, concurrency: int):
     # The requests are independent of each other, and dominated by waiting for
     # CharmHub, so run a handful of them at a time.
     workers = max(1, min(concurrency, len(charms)))
-    with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            details = list(
-                pool.map(
-                    functools.partial(charm_details, client),
-                    (name for _, name in charms),
-                )
+    with (
+        httpx.Client(timeout=REQUEST_TIMEOUT) as client,
+        concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool,
+    ):
+        details = list(
+            pool.map(
+                functools.partial(charm_details, client),
+                (name for _, name in charms),
             )
+        )
 
-    for (entry, _), charm in zip(charms, details):
+    for (entry, _), charm in zip(charms, details, strict=False):
         if charm is None:
             failed += 1
             continue
@@ -264,9 +256,7 @@ def main(cache_folder: str, concurrency: int):
             logger.info("%s has no releases with a known age", entry)
 
     if failed:
-        logger.warning(
-            "Unable to get store information for %s of %s charms", failed, len(charms)
-        )
+        logger.warning("Unable to get store information for %s of %s charms", failed, len(charms))
     report(total, all_frameworks, all_languages, min_ages, max_ages)
 
 
@@ -287,22 +277,16 @@ def report(
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table(
-        "Languages", "Language", total, sorted(languages.items())
-    )
+    table = count_and_percentage_table("Languages", "Language", total, sorted(languages.items()))
     console.print(table)
     console.print()
 
     # TODO: probably this and the next one should be bucketed?
-    table = count_and_percentage_table(
-        "Newest Artifact", "Days", total, sorted(min_ages.items())
-    )
+    table = count_and_percentage_table("Newest Artifact", "Days", total, sorted(min_ages.items()))
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table(
-        "Oldest Artifact", "Days", total, sorted(max_ages.items())
-    )
+    table = count_and_percentage_table("Oldest Artifact", "Days", total, sorted(max_ages.items()))
     console.print(table)
     console.print()
 

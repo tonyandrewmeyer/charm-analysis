@@ -11,12 +11,7 @@ from typing import Any
 
 import click
 import rich.console
-
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_repositories
-from helpers import load_yaml
-
+from helpers import configure_logging, count_and_percentage_table, iter_repositories, load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +48,7 @@ def load_charm_metadata(repo: pathlib.Path) -> dict[str, Any] | None:
     return combined
 
 
-def get_mapping(
-    metadata: dict[str, Any], key: str, repo: pathlib.Path
-) -> dict[str, Any]:
+def get_mapping(metadata: dict[str, Any], key: str, repo: pathlib.Path) -> dict[str, Any]:
     """Return the named section of the metadata, which should be a mapping.
 
     An empty mapping is returned (with a warning if the key has an unexpected
@@ -83,9 +76,7 @@ class ActionStats:
     """Statistics about the actions declared by one or more charms."""
 
     total: int = 0
-    params_count: collections.Counter[int] = dataclasses.field(
-        default_factory=collections.Counter
-    )
+    params_count: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter)
     params_by_type: collections.Counter[str] = dataclasses.field(
         default_factory=collections.Counter
     )
@@ -224,9 +215,7 @@ def count_assumes(
                 for item in nested:
                     if isinstance(item, dict):
                         # A nested any-of/all-of: count its leaves instead.
-                        count_assumes(
-                            [item], repo, juju, assumes, assumes_any, assumes_all
-                        )
+                        count_assumes([item], repo, juju, assumes, assumes_any, assumes_all)
                         continue
                     item = str(item)
                     if "juju" in item:
@@ -268,30 +257,24 @@ def main(cache_folder: str):
             continue
 
         if "assumes" in metadata:
-            count_assumes(
-                metadata["assumes"], repo, juju, assumes, assumes_any, assumes_all
-            )
+            count_assumes(metadata["assumes"], repo, juju, assumes, assumes_any, assumes_all)
         containers[len(get_mapping(metadata, "containers", repo))] += 1
         for resource in get_mapping(metadata, "resources", repo):
             resources[resource] += 1
         for relation, definition in get_mapping(metadata, "requires", repo).items():
             interface = get_field(definition, "interface", "unknown")
             relations[f"{relation} : {interface}"] += 1
-        for storage, definition in get_mapping(metadata, "storage", repo).items():
+        for definition in get_mapping(metadata, "storage", repo).values():
             storages[get_field(definition, "type", DEFAULT_STORAGE_TYPE)] += 1
-        for device, definition in get_mapping(metadata, "devices", repo).items():
+        for definition in get_mapping(metadata, "devices", repo).values():
             devices[get_field(definition, "type", "unknown")] += 1
 
         charm_actions = summarise_actions(repo)
         if charm_actions is not None:
             actions.merge(charm_actions)
 
-    logger.info(
-        "Found %s actions in total with %s params", actions.total, actions.params_count
-    )
-    logger.info(
-        "%s actions specify additionalProperties", actions.additional_properties
-    )
+    logger.info("Found %s actions in total with %s params", actions.total, actions.params_count)
+    logger.info("%s actions specify additionalProperties", actions.additional_properties)
     logger.info("%s actions have parallel set", actions.parallel)
     logger.info("%s actions have execution-group set", actions.execution_group)
     logger.info("Action defaults: %s", actions.defaults)
@@ -307,9 +290,7 @@ def main(cache_folder: str):
             dict(assumes_all),
         )
     if devices:
-        logger.warning(
-            "Found some devices (%s), add them to the report!", dict(devices)
-        )
+        logger.warning("Found some devices (%s), add them to the report!", dict(devices))
 
     report(total, juju, assumes, containers, resources, relations, storages)
 
@@ -327,9 +308,7 @@ def report(
     console = rich.console.Console()
     console.print()  # Separate out from any logging.
 
-    table = count_and_percentage_table(
-        "Juju Versions", "Version", total, sorted(juju.items())
-    )
+    table = count_and_percentage_table("Juju Versions", "Version", total, sorted(juju.items()))
     console.print(table)
     console.print()
 
@@ -342,27 +321,17 @@ def report(
     console.print(table)
     console.print()
 
-    common_resources = sorted(
-        resources.items(), key=operator.itemgetter(1), reverse=True
-    )
-    table = count_and_percentage_table(
-        "Common Resources", "Resource", total, common_resources[:5]
-    )
+    common_resources = sorted(resources.items(), key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table("Common Resources", "Resource", total, common_resources[:5])
     console.print(table)
     console.print()
 
-    common_relations = sorted(
-        relations.items(), key=operator.itemgetter(1), reverse=True
-    )
-    table = count_and_percentage_table(
-        "Common Relations", "Relation", total, common_relations[:5]
-    )
+    common_relations = sorted(relations.items(), key=operator.itemgetter(1), reverse=True)
+    table = count_and_percentage_table("Common Relations", "Relation", total, common_relations[:5])
     console.print(table)
     console.print()
 
-    table = count_and_percentage_table(
-        "Storage Types", "Storage", total, sorted(storages.items())
-    )
+    table = count_and_percentage_table("Storage Types", "Storage", total, sorted(storages.items()))
     console.print(table)
     console.print()
 

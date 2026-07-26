@@ -11,10 +11,7 @@ import typing
 
 import click
 import rich.console
-from helpers import configure_logging
-from helpers import count_and_percentage_table
-from helpers import iter_entries
-from helpers import parse_module
+from helpers import configure_logging, count_and_percentage_table, iter_entries, parse_module
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +173,7 @@ def _load_teams(team_info: typing.TextIO) -> dict[str, str]:
     help="CSV file mapping each Repository to a Team.",
 )
 @click.command()
-def main(
-    cache_folder: str, log_defer_over: int, team_info: typing.TextIO | None
-) -> None:
+def main(cache_folder: str, log_defer_over: int, team_info: typing.TextIO | None) -> None:
     """Output simple statistics about the charm code."""
     configure_logging()
 
@@ -242,9 +237,7 @@ def report(
 
     # Fill in the zeros.
     freq = [(i, defers[i]) for i in range(max(defers, default=0) + 1)]
-    table = count_and_percentage_table(
-        "event.defer() Frequency", "Frequency", total, freq
-    )
+    table = count_and_percentage_table("event.defer() Frequency", "Frequency", total, freq)
     table.add_section()
     # The number of charms that call defer() at least once (the sum of all the
     # rows would simply be the number of charms examined).
